@@ -1,0 +1,67 @@
+#==============================================================================
+# ** Two-Handed Weapons for Dual Wielders
+#------------------------------------------------------------------------------
+# This script prevents an actor with the "Dual Wield" feature from equipping 
+# another weapon if they are using a weapon defined as "Two-Handed" (like Guns).
+# It automatically unequips the other hand and locks the slot.
+#==============================================================================
+
+module TwoHandedConfig
+  # Set the Weapon Type IDs that should act as Two-Handed weapons.
+  # To find the ID, go to the 'Terms' tab in the database and look at 
+  # the Weapon Types list. (e.g., if Firearms/Guns are #12, put 12 below).
+  # You can add multiple by separating them with commas: [12, 13, 14]
+  TWO_HANDED_WTYPES = [12] 
+end
+
+class Game_Actor < Game_Battler
+  
+  #--------------------------------------------------------------------------
+  # * Alias: Change Equipment
+  #--------------------------------------------------------------------------
+  alias :sh_twohanded_dw_change_equip :change_equip
+  def change_equip(slot_id, item)
+    # Call the original equipment change first
+    sh_twohanded_dw_change_equip(slot_id, item)
+    
+    # Run check only if Dual Wielding and a Two-Handed Weapon was just equipped
+    if dual_wield? && item && item.is_a?(RPG::Weapon) && TwoHandedConfig::TWO_HANDED_WTYPES.include?(item.wtype_id)
+      
+      # If equipped in Slot 0 (Main Hand), unequip Slot 1 (Off Hand)
+      if slot_id == 0 && !equips[1].nil?
+        trade_item_with_party(nil, equips[1])
+        @equips[1].object = nil
+      end
+      
+      # If equipped in Slot 1 (Off Hand), unequip Slot 0 (Main Hand)
+      if slot_id == 1 && !equips[0].nil?
+        trade_item_with_party(nil, equips[0])
+        @equips[0].object = nil
+      end
+      
+      refresh
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Alias: Check if Equipment Slot is Locked
+  #--------------------------------------------------------------------------
+  alias :sh_twohanded_dw_equip_is_locked? :equip_is_locked?
+  def equip_is_locked?(slot_id)
+    if dual_wield?
+      # Lock Slot 1 if Slot 0 has a Two-Handed Weapon
+      if slot_id == 1 && equips[0] && equips[0].is_a?(RPG::Weapon) && TwoHandedConfig::TWO_HANDED_WTYPES.include?(equips[0].wtype_id)
+        return true
+      end
+      
+      # Lock Slot 0 if Slot 1 has a Two-Handed Weapon
+      if slot_id == 0 && equips[1] && equips[1].is_a?(RPG::Weapon) && TwoHandedConfig::TWO_HANDED_WTYPES.include?(equips[1].wtype_id)
+        return true
+      end
+    end
+    
+    # Run normal lock check for everything else
+    sh_twohanded_dw_equip_is_locked?(slot_id)
+  end
+  
+end
