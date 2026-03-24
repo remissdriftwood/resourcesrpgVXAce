@@ -1,0 +1,203 @@
+=begin
+#==============================================================================
+# ** Fighter Ammo System
+#------------------------------------------------------------------------------
+# Author: Gemini
+# Date: March 2026
+#------------------------------------------------------------------------------
+# ** Description
+# This script implements an ammunition system for guns. Weapons with a 
+# <max ammo: x> notetag are treated as guns.
+#
+# When a gun is equipped, the Attack command consumes ammo. If ammo is 0, 
+# the character will instead reload the weapon to its maximum ammo.
+#
+# Dual-wielding is natively supported. If a character dual wields two guns,
+# each is tracked separately. If one is empty and one is loaded, the empty 
+# one will be reloaded while the loaded one fires.
+# 
+# ** Usage
+# Place these tags in the Note box of your gun weapons:
+#
+#   <max ammo: x>   - Sets the maximum ammo (and flags the weapon as a gun)
+#   <shots: x>      - Sets how many shots are fired per Attack command
+#
+# Example:
+#   <max ammo: 20>
+#   <shots: 5>
+#
+# ** MP Regeneration
+# The Fighter class restores 1 MP for every successful attack that connects.
+# If a gun shoots 5 times and 3 connect, they will restore 3 MP.
+# Make sure to set your Fighter class ID(s) in the Configuration module.
+#==============================================================================
+=end
+
+$imported = {} if $imported.nil?
+$imported["FighterAmmoSystem"] = true
+
+#==============================================================================
+# ** Configuration
+#==============================================================================
+module FighterAmmoConfig
+  # Array of Class IDs that regenerate 1 MP per successful hit.
+  # Change this to match your Fighter's class ID in the database.
+  FIGHTER_CLASS_IDS = [1] 
+end
+
+#==============================================================================
+# ** RPG::Weapon
+#==============================================================================
+class RPG::Weapon < RPG::EquipItem
+  
+  def is_gun?
+    max_ammo > 0
+  end
+  
+  def max_ammo
+    return @max_ammo if @max_ammo
+    if note =~ /<max ammo:\s*(\d+)>/i
+      @max_ammo = $1.to_i
+    else
+      @max_ammo = 0
+    end
+    @max_ammo
+  end
+  
+  def shots
+    return @shots if @shots
+    if note =~ /<shots:\s*(\d+)>/i
+      @shots = $1.to_i
+    else
+      @shots = 1
+    end
+    @shots
+  end
+  
+end
+
+#==============================================================================
+# ** Game_Actor
+#==============================================================================
+class Game_Actor < Game_Battler
+  
+  # Ensure ammo array always exists for the two weapon slots
+  def ammo
+    @ammo ||= [0, 0]
+  end
+  
+  alias ammo_system_on_battle_start on_battle_start
+  def on_battle_start
+    ammo_system_on_battle_start
+    reset_ammo
+  end
+  
+  alias ammo_system_on_battle_end on_battle_end
+  def on_battle_end
+    ammo_system_on_battle_end
+    reset_ammo
+  end
+  
+  def reset_ammo
+    @ammo = [0, 0]
+    weapons.each_with_index do |w, i|
+      @ammo[i] = (w && w.is_gun?) ? w.max_ammo : 0
+    end
+  end
+  
+  def reload_gun(index)
+    @ammo[index] = weapons[index].max_ammo
+  end
+  
+  alias ammo_system_change_equip change_equip
+  def change_equip(slot_id, item)
+    ammo_system_change_equip(slot_id, item)
+    # If equip is changed during battle, reset ammo for that slot
+    if $game_party.in_battle && slot_id < 2 # 0 and 1 are weapon slots
+      self.ammo[slot_id] = (item && item.is_gun?) ? item.max_ammo : 0
+    end
+  end
+  
+end
+
+#==============================================================================
+# ** Scene_Battle
+#==============================================================================
+class Scene_Battle < Scene_Base
+  
+  alias ammo_system_use_item use_item
+  def use_item
+    item = @subject.current_action.item
+    
+    # Check if the user is an Actor using their Attack Skill
+    if @subject.is_a?(Game_Actor) && item.id == @subject.attack_skill_id
+      has_gun = @subject.weapons.any? { |w| w && w.is_gun? }
+      
+      if has_gun
+        @log_window.display_use_item(@subject, item)
+        @subject.use_item(item)
+        refresh_status
+        targets = @subject.current_action.make_targets.compact
+        
+        # Process each equipped weapon independently 
+        @subject.weapons.each_with_index do |weapon, index|
+          next if weapon.nil?
+          
+          if weapon.is_gun?
+            if @subject.ammo[index] <= 0
+              # Reload if empty
+              @subject.reload_gun(index)
+              @log_window.add_text("#{@subject.name} reloads #{weapon.name}!")
+              @log_window.wait
+            else
+              # Fire the gun
+              shots_fired = [@subject.ammo[index], weapon.shots].min
+              @subject.ammo[index] -= shots_fired
+              
+              # Use the correct animation based on the slot index
+              anim_id = index == 0 ? @subject.atk_animation_id1 : @subject.atk_animation_id2
+              show_normal_animation(targets, anim_id, false)
+              
+              # Invoke the hit X times based on shots fired
+              targets.each do |target|
+                shots_fired.times { invoke_item(target, item) }
+              end
+            end
+          else
+            # If dual wielding a gun and a melee weapon, process melee normally
+            anim_id = index == 0 ? @subject.atk_animation_id1 : @subject.atk_animation_id2
+            show_normal_animation(targets, anim_id, false)
+            targets.each do |target|
+              item.repeats.times { invoke_item(target, item) }
+            end
+          end
+        end
+        return # End processing for gun logic so it doesn't trigger the alias below
+      end
+    end
+    
+    # If not a basic attack or the actor doesn't have a gun, fallback to standard behavior
+    ammo_system_use_item
+  end
+  
+end
+
+#==============================================================================
+# ** Game_Battler (MP Regeneration)
+#==============================================================================
+class Game_Battler < Game_BattlerBase
+  
+  alias ammo_system_item_apply item_apply
+  def item_apply(user, item)
+    ammo_system_item_apply(user, item)
+    
+    # If attack connected, is performed by an actor, and is the basic Attack skill
+    if @result.hit? && user.is_a?(Game_Actor) && item.id == user.attack_skill_id
+      if FighterAmmoConfig::FIGHTER_CLASS_IDS.include?(user.class_id)
+        # Give 1 MP per successful connection (Automatically capped at Max MP by RMVXA natively)
+        user.mp += 1
+      end
+    end
+  end
+  
+end
