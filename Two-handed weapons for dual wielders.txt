@@ -11,7 +11,7 @@ module TwoHandedConfig
   # To find the ID, go to the 'Terms' tab in the database and look at 
   # the Weapon Types list. (e.g., if Firearms/Guns are #12, put 12 below).
   # You can add multiple by separating them with commas: [12, 13, 14]
-  TWO_HANDED_WTYPES = [12] 
+  TWO_HANDED_WTYPES = [8] 
 end
 
 class Game_Actor < Game_Battler
