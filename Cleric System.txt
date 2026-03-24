@@ -1,0 +1,109 @@
+# ------------------------------------------------------------------------------
+# Cleric System
+# Defines the rules for Farmer skills, including managing circles.
+# ------------------------------------------------------------------------------
+#
+#===============================================================================
+# ** Global variable with an array containg all currently active circles
+#===============================================================================
+$Circles_active = []
+
+#===============================================================================
+# ** Circle class
+#===============================================================================
+
+class Circle
+  
+  #-----------------------------------------------------------------------------
+  # * Hash of applicable circle skill ids and their corresponding effect
+  #   common event ids
+  #-----------------------------------------------------------------------------
+  Circle_skills = {
+
+    49 => 37,   # Circle of tranquility
+    52 => 40,   # Circle of hostility
+    58 => 46,   # Circle of immortality
+    104 => 41,  # Circle of attunement
+    112 => 47,  # Circle of darkness
+    115 => 57,  # Circle of immobility
+
+  }
+  
+  #-----------------------------------------------------------------------------
+  # * Public Instance Variables
+  #-----------------------------------------------------------------------------
+  attr_accessor :caster_id
+  attr_accessor :circle_id
+  attr_accessor :active
+  attr_accessor :effect_event_id
+  
+  #-----------------------------------------------------------------------------
+  # * Creates a new Circle object
+  #-----------------------------------------------------------------------------
+  def initialize(actor_id, skill_id)
+    @caster_id = actor_id
+    @circle_id = skill_id
+    @effect_id = circle_id + 1
+    @effect_event_id = Circle_skills.fetch(skill_id)
+    @active = true
+    $game_switches[25] = true
+    $Circles_active.push(self)
+    #$game_message.add("#{$Circles_active}")
+  end
+  
+  #-----------------------------------------------------------------------------
+  # * Circle effect processor
+  #-----------------------------------------------------------------------------
+  def run_effect_event()
+    $game_temp.reserve_common_event(effect_event_id)
+  end
+  
+  #-----------------------------------------------------------------------------
+  # * Check for circle caster death and clear circle if dead
+  #-----------------------------------------------------------------------------
+  def caster_death_check()
+    if $game_actors[caster_id].dead? == true then
+      $Circles_active.delete(self)
+      self.active = false
+      else end
+  end
+  
+end
+
+#===============================================================================
+# ** Circle of hostility effect
+#==============================================================================
+
+def circle_hostility()
+  # Add ATK buff to party members
+  $game_party.battle_members.each { |battler| battler.add_state(38) }
+  $game_party.clear_results
+
+  # Add ATK buff to enemies
+  $game_troop.members.each { |battler| battler.add_state(38) }
+  $game_troop.clear_results
+
+end
+
+#===============================================================================
+# ** Circle of attunement effect
+#==============================================================================
+
+def circle_attunement()
+  # Add MAT buff to party members
+  $game_party.battle_members.each { |battler| battler.add_state(38) }
+  $game_party.clear_results
+
+  # Add MAT buff to enemies
+  $game_troop.members.each { |battler| battler.add_state(38) }
+  $game_troop.clear_results
+
+end
+
+#===============================================================================
+# ** Cleric MP restore
+#===============================================================================
+
+def MP_restore_cleric(actor_id, amount)
+  $game_actors[actor_id].mp += amount
+end

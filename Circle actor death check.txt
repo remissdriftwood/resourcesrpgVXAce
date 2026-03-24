@@ -1,0 +1,24 @@
+def circle_actor_death_check()
+if $game_switches[25] || $game_switches[26] == true
+    
+    #End circle of tranquility
+    if $game_party.battle_members[$game_variables[14]].death_state? == true then
+      
+      $game_switches[25] = false;
+      
+    else end
+    
+    #End circle of hostility
+    if $game_party.battle_members[$game_variables[15]].death_state? == true then
+      
+      $game_switches[26] = false;
+      $game_party.battle_members.each { |battler| battler.remove_state(38) }
+      $game_party.clear_results
+      $game_troop.members.each { |battler| battler.remove_state(38) }
+      $game_troop.clear_results
+      
+    else end
+      
+    else end
+      
+end

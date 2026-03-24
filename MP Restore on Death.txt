@@ -1,0 +1,58 @@
+#==============================================================================
+# ** MP Restore on Death (Safe Version)
+#------------------------------------------------------------------------------
+#  Restores MP to max when specific classes die.
+#  Includes protections against Stack Level Too Deep errors.
+#==============================================================================
+
+module SH_DeathMP
+  #--------------------------------------------------------------------------
+  # * CONFIGURATION
+  #--------------------------------------------------------------------------
+  # Add the ID(s) of the Classes that trigger this effect.
+  TARGET_CLASS_IDS = [3] 
+end
+
+#==============================================================================
+# ** Game_Actor
+#==============================================================================
+
+class Game_Actor < Game_Battler
+  
+  #--------------------------------------------------------------------------
+  # * Safety Check: Ensure we don't alias twice (Prevents F12 crashes)
+  #--------------------------------------------------------------------------
+  unless method_defined?(:sh_restore_mp_add_state)
+    alias :sh_restore_mp_add_state :add_state
+  end
+  
+  def add_state(state_id)
+    # 1. Run the original code
+    sh_restore_mp_add_state(state_id)
+
+    # 2. Recursion Guard:
+    # If we are currently inside the MP restoration logic, stop here.
+    # This prevents other scripts (like Yanfly) from triggering an infinite loop
+    # if they react to the MP change we are about to make.
+    return if @sh_restoring_mp_flag
+
+    # 3. The Check
+    if state_id == death_state_id
+      if self.dead?
+        if SH_DeathMP::TARGET_CLASS_IDS.include?(self.class_id)
+          
+          # Turn on the flag to say "We are currently changing MP"
+          @sh_restoring_mp_flag = true
+          
+          # Restore the MP
+          self.mp = self.mmp
+          
+          # Turn the flag off
+          @sh_restoring_mp_flag = false
+          
+        end
+      end
+    end
+  end
+  
+end

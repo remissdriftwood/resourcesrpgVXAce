@@ -1,0 +1,365 @@
+#==============================================================================
+# ** Enemy Database Importer (RGSS3 for RPG Maker VX Ace)
+#------------------------------------------------------------------------------
+# This script reads enemy data from a CSV file in the project's Data folder
+# and dynamically creates or updates enemies in the game's database ($data_enemies).
+#
+# Place this script in a new slot below "Materials" in the Script Editor.
+#
+# CSV File Format:
+# Create a file named 'Enemies.csv' (case-sensitive) in your project's 'Data' folder.
+# The first row MUST be the exact header specified below. Columns must be in this order.
+#
+# Expected CSV Columns (order matters!):
+# ID,Name,MHP,MMP,ATK,DEF,MAT,MDF,AGI,LUK,EXP,Gold,Notes,
+# Drop Item 1,Drop Item 2,Drop Item 3,
+# Action 1,Action 2,Action 3,Action 4,Action 5,Action 6,Action 7,Action 8,Action 9,
+# Feature 1,Feature 2,Feature 3,Feature 4,Feature 5,Feature 6,Feature 7,Feature 8,
+# Feature 9,Feature 10,Feature 11,Feature 12,Feature 13,Feature 14,Feature 15,
+# Feature 16,Feature 17,Feature 18
+#
+# --- Column Specifics ---
+#
+# ID:             A unique 3-digit numerical value (1-999).
+# Name:           String.
+# MHP, MMP, ATK, DEF, MAT, MDF, AGI, LUK, EXP, Gold: Integer values.
+# Notes:          String. Can contain RPG Maker's escape characters (e.g., \n for newline).
+#
+# Drop Items (Drop Item 1, Drop Item 2, Drop Item 3):
+#   Format: "Type:ID:Denominator"
+#   Type: 'I' for Item, 'W' for Weapon, 'A' for Armor.
+#   ID: The ID of the item/weapon/armor in the respective database (e.g., Item ID 5).
+#   Denominator: The chance (e.g., 10 for 1/10 chance, 20 for 1/20 chance).
+#   Example: "I:5:10" (Item ID 5, 1/10 chance), "W:3:20" (Weapon ID 3, 1/20 chance)
+#   Leave the cell blank for no drop item.
+#
+# Action Patterns (Action 1 ... Action 9):
+#   Format: "SkillID:Rating[:ConditionType[:Param1[:Param2]]]"
+#   SkillID: The ID of the skill in the database (e.g., Skill ID 1 for basic attack).
+#   Rating:  (1-10) How likely the enemy is to use this action (1=least likely, 10=most likely).
+#   ConditionType (Optional, defaults to 'Always' (0) if not specified):
+#     0: 'Always', 1: 'Turn', 2: 'HP', 3: 'State', 4: 'PartyLevel', 5: 'Switch'
+#     You can use the numerical code or the string alias (case-insensitive).
+#   Param1, Param2 (Optional, depend on ConditionType):
+#     - 'Turn': Param1 (turn number), Param2 (span). E.g., "10:7:Turn:1:2" (Skill 10, Rating 7, every 2 turns starting turn 1).
+#     - 'HP': Param1 (HP % from top), Param2 (HP % from bottom). E.g., "12:8:HP:50:0" (Skill 12, Rating 8, when HP is 50% or less).
+#     - 'State': Param1 (State ID), Param2 (not used). E.g., "14:6:State:5" (Skill 14, Rating 6, when State 5 is active).
+#     - 'PartyLevel': Param1 (level), Param2 (not used). E.g., "16:5:PartyLevel:10" (Skill 16, Rating 5, when party level is 10 or higher).
+#     - 'Switch': Param1 (Switch ID), Param2 (Switch Value: 0 for OFF, 1 for ON). E.g., "18:4:Switch:10:1" (Skill 18, Rating 4, when Switch 10 is ON).
+#   Leave the cell blank for no action pattern.
+#
+# Features (Feature 1 ... Feature 18):
+#   Format: "Code:DataID[:Value]"
+#   Code: Numerical code representing the feature type.
+#   DataID: ID related to the feature (e.g., element ID, state ID, parameter ID).
+#   Value (Optional, for features like rates or parameters): Numerical value (e.g., 0.5 for 50%, 1.2 for 120%).
+#   Example: "22:1:0.25" (Attack State: State ID 1, 25% chance), "13:5:0.75" (State Rate: State ID 5, 75% rate)
+#   Leave the cell blank for no feature.
+#
+#   --- Common Feature Codes ---
+#   11: Element Rate (DataID: Element ID, Value: Rate multiplier, e.g., 0.5 for 50% damage)
+#   12: Debuff Rate (DataID: Param ID 0-7, Value: Rate multiplier)
+#   13: State Rate (DataID: State ID, Value: Rate multiplier)
+#   14: State Resist (DataID: State ID)
+#   21: Attack Element (DataID: Element ID)
+#   22: Attack State (DataID: State ID, Value: Chance %)
+#   23: Attack Speed (Value: Speed increase)
+#   24: Attack Times (Value: Number of times)
+#   31: Add Skill (DataID: Skill ID)
+#   32: Remove Skill (DataID: Skill ID)
+#   33: Add Weapon (DataID: Weapon ID)
+#   34: Add Armor (DataID: Armor ID)
+#   35: Equip Fix (DataID: Equipment Type ID)
+#   36: Equip Seal (DataID: Equipment Type ID)
+#   41: Param Plus (DataID: Param ID 0-7, Value: Additive bonus)
+#   42: Param Rate (DataID: Param ID 0-7, Value: Rate multiplier, e.g., 0.1 for +10% HP)
+#       (Param IDs: 0: MHP, 1: MMP, 2: ATK, 3: DEF, 4: MAT, 5: MDF, 6: AGI, 7: LUK)
+#   51: Action Times Rate (Value: Rate multiplier, e.g., 0.2 for +20% action times)
+#   52: Special Flag (DataID: 0: Auto Battle, 1: Guard, 2: Substitute, 3: Preserve TP)
+#   53: Party Ability (DataID: 0: Encounter Half, 1: Encounter None, 2: Damage Floor Half,
+#                         3: Critical Hit Rate Up, 4: Preemptive Attack Up, 5: Surprise Attack Down,
+#                         6: Gold Double, 7: Drop Item Double)
+#   61: Attack Skill (DataID: Skill ID)
+#   62: Guard Skill (DataID: Skill ID)
+#   63: Substitute Guard (DataID: Guardian Type, Value: % of allies)
+#   64: Release State (DataID: State ID)
+#   65: Collapse Effect (DataID: 0: Normal, 1: Boss, 2: Instant, 3: None)
+#
+# --- Usage ---
+# The script will attempt to load 'Data/Enemies.csv' when the game starts.
+# It is recommended to run this only during development or through a specific
+# debug event, as modifying `$data_enemies` directly at runtime for every player
+# can be problematic if the CSV is not distributed with the game or changes after deployment.
+#
+# To avoid overwriting changes made in the RPG Maker editor, back up your
+# Data/Enemies.rvdata2 file before running the game with this script.
+#
+# For more robust control, you could remove the `EnemyImporter.import_enemies`
+# line at the bottom and instead call the method via a Common Event script command:
+# EnemyImporter.import_enemies
+# This allows you to control exactly when the data is loaded.
+#==============================================================================
+
+module EnemyImporter
+
+  # Path to the CSV file relative to your project's root directory.
+  # Ensure the file is named 'Enemies.csv' and placed in the 'Data' folder.
+  CSV_FILE_PATH = "Data/Enemies.csv"
+
+  # A hash to map string aliases for action condition types to their numerical codes.
+  ACTION_CONDITION_TYPES = {
+    'always'     => 0,
+    'turn'       => 1,
+    'hp'         => 2,
+    'state'      => 3,
+    'partylevel' => 4,
+    'switch'     => 5
+  }
+
+  #--------------------------------------------------------------------------
+  # * Helper method to parse a single drop item string from CSV.
+  #   Format: "Type:ID:Denominator" (e.g., "I:5:10", "W:3:20", "A:1:5")
+  #--------------------------------------------------------------------------
+  def self.parse_drop_item(drop_str)
+    return nil if drop_str.nil? || drop_str.strip.empty? # Return nil if string is empty
+    parts = drop_str.strip.split(':').map(&:strip)
+    return nil unless parts.size == 3 # Must have exactly 3 parts
+
+    kind_char = parts[0].upcase
+    id = parts[1].to_i
+    denominator = parts[2].to_i
+
+    drop_item = RPG::Enemy::DropItem.new
+    drop_item.denominator = denominator
+
+    case kind_char
+    when 'I' then drop_item.kind = 1 # Item
+    when 'W' then drop_item.kind = 2 # Weapon
+    when 'A' then drop_item.kind = 3 # Armor
+    else
+      # Output a warning if the drop item type is invalid.
+      p "Warning: Invalid drop item type '#{kind_char}' in '#{drop_str}'. Skipping."
+      return nil
+    end
+
+    # Assign item ID based on the determined kind
+    drop_item.item_id = id if drop_item.kind == 1
+    drop_item.weapon_id = id if drop_item.kind == 2
+    drop_item.armor_id = id if drop_item.kind == 3
+    return drop_item
+  end
+
+  #--------------------------------------------------------------------------
+  # * Helper method to parse a single action pattern string from CSV.
+  #   Format: "SkillID:Rating[:ConditionType[:Param1[:Param2]]]"
+  #--------------------------------------------------------------------------
+  def self.parse_action_pattern(action_str)
+    return nil if action_str.nil? || action_str.strip.empty? # Return nil if string is empty
+    parts = action_str.strip.split(':').map(&:strip)
+    return nil unless parts.size >= 2 # Must have at least SkillID and Rating
+
+    action = RPG::Enemy::Action.new
+    action.skill_id = parts[0].to_i
+    action.rating = parts[1].to_i.clamp(1, 10) # Clamp rating to be between 1 and 10
+
+    if parts.size >= 3
+      condition_type_str = parts[2].downcase
+      # Try to find numerical code from alias, otherwise parse as integer directly
+      action.condition_type = ACTION_CONDITION_TYPES[condition_type_str] || parts[2].to_i
+    else
+      action.condition_type = 0 # Default to 'Always' if condition type is not specified
+    end
+
+    # Assign parameters based on their presence in the string
+    action.condition_param1 = parts[3].to_i if parts.size >= 4
+    action.condition_param2 = parts[4].to_i if parts.size >= 5
+
+    return action
+  end
+
+  #--------------------------------------------------------------------------
+  # * Helper method to parse a single feature string from CSV.
+  #   Format: "Code:DataID[:Value]"
+  #--------------------------------------------------------------------------
+  def self.parse_feature(feature_str)
+    return nil if feature_str.nil? || feature_str.strip.empty? # Return nil if string is empty
+    parts = feature_str.strip.split(':').map(&:strip)
+    return nil unless parts.size >= 2 # Must have at least Code and DataID
+
+    feature = RPG::BaseItem::Feature.new
+    feature.code = parts[0].to_i
+    feature.data_id = parts[1].to_i
+    feature.value = parts[2].to_f if parts.size >= 3
+    feature.value = 1.0 unless parts.size >= 3 # Default value for many features (e.g., 1.0 for rates, 1 for counts)
+
+    return feature
+  end
+
+  #--------------------------------------------------------------------------
+  # * Main import method for enemies.
+  #   Reads from CSV and updates $data_enemies.
+  #--------------------------------------------------------------------------
+  def self.import_enemies
+    file_path = CSV_FILE_PATH
+
+    # Check if the CSV file exists
+    unless File.exist?(file_path)
+      p "Error: CSV file not found at #{file_path}. Please create it."
+      return
+    end
+
+    begin
+      # Read all lines from the CSV file. Using 'UTF-8' encoding for broad compatibility.
+      lines = File.readlines(file_path, encoding: 'UTF-8')
+      
+      # Extract header and data rows
+      header = lines.first.strip.split(',')
+      data_rows = lines[1..-1] # All lines after the header
+
+      # Define the expected strict prefix of the header columns.
+      # This ensures the essential columns are in place.
+      expected_header_prefix = [
+        "ID", "Name", "MHP", "MMP", "ATK", "DEF", "MAT", "MDF", "AGI", "LUK", "EXP", "Gold", "Notes"
+      ]
+      
+      # Validate the header prefix to ensure correct column order for core attributes
+      unless header.size >= expected_header_prefix.size && header[0..expected_header_prefix.size-1] == expected_header_prefix
+        p "Error: CSV header prefix does not match expected format."
+        p "Expected start: #{expected_header_prefix.join(',')}"
+        p "Found start:    #{header[0..expected_header_prefix.size-1].join(',')}"
+        return # Exit if header is incorrect
+      end
+
+      # Dynamically find indices for drop items, actions, and features
+      # This makes the script more flexible if you choose to omit some of these columns
+      # (though the full header is recommended for clarity).
+      drop_item_indices = (1..3).map { |i| header.index("Drop Item #{i}") }.compact
+      action_indices = (1..9).map { |i| header.index("Action #{i}") }.compact
+      feature_indices = (1..18).map { |i| header.index("Feature #{i}") }.compact
+
+      p "Starting enemy import from #{file_path}..."
+
+      # Process each data row from the CSV
+      data_rows.each_with_index do |line, row_index|
+        values = line.strip.split(',') # Split the line by comma
+        next if values.empty? || values.all?(&:empty?) # Skip entirely empty lines
+
+        # Create a hash mapping header names to their corresponding values for current row
+        row_data = {}
+        header.each_with_index do |col_name, col_idx|
+          row_data[col_name.to_sym] = values[col_idx] # Convert column name to symbol for hash key
+        end
+
+        enemy_id = row_data[:ID].to_i
+        
+        # Validate enemy ID
+        if enemy_id <= 0 || enemy_id > 999
+          p "Warning: Invalid enemy ID #{enemy_id} on row #{row_index + 2}. ID must be between 1 and 999. Skipping row."
+          next
+        end
+
+        # Ensure $data_enemies array is large enough to accommodate the new ID.
+        # RPG Maker's database arrays are 1-indexed, so $data_enemies[0] is nil.
+        # This will extend the array with nil placeholders if needed.
+        if $data_enemies.size <= enemy_id
+          ($data_enemies.size..enemy_id).each { |i| $data_enemies[i] = nil }
+        end
+
+        # Create a new enemy object if it doesn't exist at this ID, otherwise update existing.
+        if $data_enemies[enemy_id].nil?
+          $data_enemies[enemy_id] = RPG::Enemy.new
+          $data_enemies[enemy_id].id = enemy_id
+          p "  Creating new enemy with ID: #{enemy_id}"
+        else
+          p "  Updating existing enemy with ID: #{enemy_id}"
+        end
+
+        # Get a reference to the enemy object for easier modification
+        enemy = $data_enemies[enemy_id]
+
+        # --- Basic Attributes ---
+        enemy.name = row_data[:Name].to_s
+        enemy.note = row_data[:Notes].to_s
+
+        # Assign parameters (MHP, MMP, ATK, DEF, MAT, MDF, AGI, LUK)
+        # These are stored in the 'params' array of the RPG::Enemy object.
+        enemy.params[0] = row_data[:MHP].to_i
+        enemy.params[1] = row_data[:MMP].to_i
+        enemy.params[2] = row_data[:ATK].to_i
+        enemy.params[3] = row_data[:DEF].to_i
+        enemy.params[4] = row_data[:MAT].to_i
+        enemy.params[5] = row_data[:MDF].to_i
+        enemy.params[6] = row_data[:AGI].to_i
+        enemy.params[7] = row_data[:LUK].to_i
+
+        # Assign EXP and Gold rewards
+        enemy.exp = row_data[:EXP].to_i
+        enemy.gold = row_data[:Gold].to_i
+
+        # --- Drop Items ---
+        enemy.drop_items.clear # Clear any previously set drop items before adding new ones
+        drop_item_indices.each do |idx|
+          drop_str = values[idx]
+          drop_item = parse_drop_item(drop_str)
+          enemy.drop_items.push(drop_item) unless drop_item.nil?
+        end
+
+        # --- Action Patterns ---
+        enemy.actions.clear # Clear any previously set action patterns before adding new ones
+        action_indices.each do |idx|
+          action_str = values[idx]
+          action = parse_action_pattern(action_str)
+          enemy.actions.push(action) unless action.nil?
+        end
+        
+        # Ensure at least one default action if no valid actions were specified in CSV.
+        # This prevents enemies from having no actions at all.
+        if enemy.actions.empty?
+          default_action = RPG::Enemy::Action.new
+          default_action.skill_id = 1 # Skill ID 1 is typically the basic "Attack" skill
+          default_action.rating = 5 # A moderate rating
+          default_action.condition_type = 0 # Always
+          enemy.actions.push(default_action)
+          p "  Added default 'Attack' action for enemy ID #{enemy_id} as no actions were specified."
+        end
+
+        # --- Features ---
+        enemy.features.clear # Clear any previously set features before adding new ones
+        feature_indices.each do |idx|
+          feature_str = values[idx]
+          feature = parse_feature(feature_str)
+          enemy.features.push(feature) unless feature.nil?
+        end
+
+        p "  Successfully processed enemy: ID #{enemy_id}, Name: #{enemy.name}"
+      end
+
+      # Report completion and total number of enemies (excluding nil entries)
+      p "Enemy import complete! Total unique enemies in database: #{$data_enemies.compact.size}"
+
+    # Handle file-related errors (e.g., file not found, permission issues)
+    rescue SystemCallError => e
+      p "File error: #{e.message}. Ensure 'Data/Enemies.csv' exists and is readable."
+    # Catch any other unexpected errors during parsing or object manipulation
+    rescue => e
+      p "An unexpected error occurred during CSV parsing or enemy creation: #{e.message}"
+      p e.backtrace.join("\n") # Print the full backtrace for debugging
+    end
+  end
+end
+
+#==============================================================================
+# Call the importer on game startup
+#------------------------------------------------------------------------------
+# This line triggers the enemy import process when the game application starts.
+# For more precise control over when the enemies are loaded or updated,
+# consider commenting out this line and calling `EnemyImporter.import_enemies`
+# from a specific Common Event or map event using a "Script" command.
+# For example:
+#   EnemyImporter.import_enemies
+#==============================================================================
+# EnemyImporter.import_enemies
+
+#==============================================================================
+# END OF SCRIPT
+#==============================================================================

@@ -1,0 +1,37 @@
+def circle_immortality()
+  
+  #run through party, revive fallen memebers, and reduce MHP by 50%
+  $game_party.battle_members.each_with_index { |battler, i| 
+  
+  if $game_party.battle_members[i].death_state? == true then
+    battler.revive
+    #battler.mhp = battler.mhp / 2
+  else end
+    
+    }
+    
+  $game_party.clear_results
+  
+  #run through enemy troop, revive fallen memebers, and reduce MHP by 50%
+  #$game_party.battle_members.each_with_index { |battler, i| 
+  
+    #$game_troop.members.each { |battler| 
+      #battler.force_action(133, 0) 
+      #}
+  
+  #if $game_troop.members[i].death_state? == true then
+    #enemy = Game_Enemy.new(1, i)
+      #enemy.hide if member.hidden
+      #enemy.screen_x = member.x
+      #enemy.screen_y = member.y
+      #@enemies.push(enemy)
+    #battler.remove_state(1)
+    #battler.revive
+    #battler.mhp = battler.mhp / 2
+  #else end
+    
+    #}
+    
+  #$game_troop.clear_results
+  
+end

@@ -1,0 +1,57 @@
+#==============================================================================
+# ** Battle End Switch & Common Event Trigger
+#------------------------------------------------------------------------------
+# Author: Your Name/AI Assistant
+# Version: 2.0
+# Date: 2025-11-23
+#------------------------------------------------------------------------------
+# This script automatically turns on a specified switch ID and reserves a 
+# specified Common Event to run when a battle ends.
+#
+# Usage:
+# 1. Paste this script into a new slot above Main in the Script Editor.
+# 2. Configure the BATTLE_END_SWITCH_ID and BATTLE_END_COMMON_EVENT_ID below.
+#==============================================================================
+
+module BattleEndConfig
+  #--------------------------------------------------------------------------
+  # * Configuration
+  #--------------------------------------------------------------------------
+  
+  # Set the ID of the switch to turn ON when a battle ends.
+  # Set to 0 to disable this feature.
+  BATTLE_END_SWITCH_ID = 5 
+
+  # Set the ID of the Common Event to run when a battle ends.
+  # This will execute immediately upon returning to the map.
+  # Set to 0 to disable this feature.
+  BATTLE_END_COMMON_EVENT_ID = 9
+end
+
+#==============================================================================
+# ** Scene_Battle
+#------------------------------------------------------------------------------
+# This class processes battle screens.
+#==============================================================================
+
+class Scene_Battle < Scene_Base
+  #--------------------------------------------------------------------------
+  # * Terminate Battle
+  #--------------------------------------------------------------------------
+  alias battle_end_actions_terminate terminate
+  def terminate
+    battle_end_actions_terminate # Call original terminate method first
+
+    # --- Process Switch ---
+    if BattleEndConfig::BATTLE_END_SWITCH_ID > 0
+      $game_switches[BattleEndConfig::BATTLE_END_SWITCH_ID] = true
+    end
+
+    # --- Process Common Event ---
+    if BattleEndConfig::BATTLE_END_COMMON_EVENT_ID > 0
+      # In VX Ace, we reserve the common event to run as soon as the Map scene loads
+      $game_temp.reserve_common_event(BattleEndConfig::BATTLE_END_COMMON_EVENT_ID)
+    end
+    
+  end
+end

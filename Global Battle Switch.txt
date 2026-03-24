@@ -1,0 +1,70 @@
+#==============================================================================
+# ★ Global Battle Switch & Post-Battle Event
+#==============================================================================
+# Author: Gemini
+# Version: 2.0
+# Date: July 30, 2025
+#
+# Description:
+# This script automatically manages a switch and a common event for all battles.
+# 1. Turns a specific switch ON at the beginning of any battle.
+# 2. Turns that same switch OFF as soon as the battle ends.
+# 3. Runs a specific Common Event after the battle concludes.
+# This removes the need to add events to troops or after battle processing.
+#
+#==============================================================================
+
+module GlobalBattleSwitch
+  # --- CONFIGURATION ---
+  
+  # Set this to the ID of the switch you want to control.
+  # This switch will be ON during battle and OFF otherwise.
+  BATTLE_SWITCH_ID = 5
+  
+  # --- NEW ---
+  # Set this to the ID of the Common Event you want to run after every battle.
+  # The event will run as soon as you return to the map.
+  # Set this to 0 if you don't want to run any common event.
+  POST_BATTLE_COMMON_EVENT_ID = 9
+  
+  # --- END OF CONFIGURATION ---
+end
+
+#==============================================================================
+# ★ BattleManager
+#==============================================================================
+# Do not edit below this line unless you know what you're doing.
+#
+class << BattleManager
+  
+  # Alias the original setup method to add our new functionality.
+  alias_method :global_switch_setup_battle, :setup
+  def setup(*args)
+    # Call the original setup method first.
+    global_switch_setup_battle(*args)
+    
+    # --- Turn the switch ON ---
+    # This code runs right after the battle is set up, before it starts.
+    $game_switches[GlobalBattleSwitch::BATTLE_SWITCH_ID] = true
+  end
+
+  # Alias the original battle_end method.
+  alias_method :global_switch_battle_end, :battle_end
+  def battle_end(*args)
+    # Call the original battle_end method first.
+    global_switch_battle_end(*args)
+    
+    # --- Turn the switch OFF ---
+    # This code runs right after the battle has concluded.
+    $game_switches[GlobalBattleSwitch::BATTLE_SWITCH_ID] = false
+    
+    # --- NEW: Reserve the Post-Battle Common Event ---
+    # Get the ID from the configuration.
+    common_event_id = GlobalBattleSwitch::POST_BATTLE_COMMON_EVENT_ID
+    # If the ID is valid (not 0), reserve the common event to be run.
+    if common_event_id > 0
+      $game_temp.reserve_common_event(common_event_id)
+    end
+  end
+  
+end

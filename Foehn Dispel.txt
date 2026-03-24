@@ -1,0 +1,10 @@
+def foehn_dispel()
+  #Remove states, buffs, and debuffs for entire party
+  $game_party.battle_members.each { |battler| battler.clear_states }
+  $game_party.clear_results
+
+  #Remove states, buffs, and debuffs for all enemies in troop
+  $game_troop.members.each { |battler| battler.clear_states }
+  $game_troop.clear_results
+
+  end

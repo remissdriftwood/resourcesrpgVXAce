@@ -1,0 +1,26 @@
+def transmission_transfer(target)
+  
+  # Remember then remove target's first state
+  if $game_party.battle_members[target].states[0] != nil then
+    ailment = $game_party.battle_members[target].states[0].id
+    $game_party.battle_members[target].clear_states
+
+  # Pass first state to all enemies unless nil
+    $game_troop.members.each { |battler| battler.add_state(ailment) }
+    $game_troop.clear_results
+  
+    else end
+    
+
+  # Transfer states to all enemies
+#  i = a.length
+#  if a[i] != nil then
+ #    while i > 0 do
+ #      r = 1 + rand(10)
+ #      if r > 4 then
+ #       $game_troop.members.each { |battler| battler.add_state(a[i]) }
+ #       $game_troop.clear_results
+#      else end
+#        end
+#  else end
+end  

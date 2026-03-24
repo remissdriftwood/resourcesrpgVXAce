@@ -1,0 +1,98 @@
+# ------------------------------------------------------------------------------
+# Farmer System
+# Defines the rules for Farmer skills, including how seeds are planted, 
+# remembering which seeds are planted and who planted them.
+# ------------------------------------------------------------------------------
+#
+#===============================================================================
+# ** Global variable with an array containg all currently growing/grown seed 
+#    objects
+#===============================================================================
+$Seeds_growing = []
+
+#===============================================================================
+# ** Seed class
+#===============================================================================
+
+class Seed
+  
+  #-----------------------------------------------------------------------------
+  # * Hash of applicable seed skill ids and their corresponding harvest
+  #   skill ids
+  #-----------------------------------------------------------------------------
+  Seed_skills = {
+  
+    "64" => "65",  # Brandywine
+    "66" => "67",  # Moon & Stars
+    "68" => "69",  # Ponkan
+    "70" => "71",  # Bitter melon
+    "72" => "73",  # Mung bean
+    "74" => "75",  # 7 Pot Douglah
+    "76" => "77",  # Cherry Belle
+    "78" => "79",  # Fly Agaric
+    "80" => "81",  # Crabapple
+    "82" => "83",  # Cara Cara
+    "84" => "85",  # Destroying Angel
+    "86" => "87",  # Prickly Cucumber
+    "88" => "89",  # Freestone (unimplemented)
+    "90" => "91",  # Fairy Tale
+    "92" => "93",  # Slimes
+  
+    }
+  
+  #-----------------------------------------------------------------------------
+  # * Public Instance Variables
+  #-----------------------------------------------------------------------------
+  attr_accessor :planter_id
+  attr_accessor :plant_id
+  attr_accessor :harvest_id
+  attr_accessor :growing
+  
+  #-----------------------------------------------------------------------------
+  # * Creates a new Seed object
+  #-----------------------------------------------------------------------------
+  def initialize(actor_id, skill_id)
+    @planter_id = actor_id
+    @plant_id = skill_id
+    @harvest_id = plant_id + 1
+    @growing = 3
+    $game_switches[3] = true
+    $game_actors[actor_id].forget_skill(plant_id)
+    $Seeds_growing.push(self)
+    # Test that seed objects are properly pushed to the array. (They are.)
+    # $game_message.add("#{$Seeds_growing.last()}")
+  end
+  
+  #-----------------------------------------------------------------------------
+  # * Grows the seed
+  #-----------------------------------------------------------------------------
+  def grow()
+    if growing <= 0 then
+      $game_actors[planter_id].learn_skill(harvest_id)
+      else @growing -= 1
+    end
+  end
+  
+  #-----------------------------------------------------------------------------
+  # * Harvests the seed
+  #-----------------------------------------------------------------------------
+  def harvest()
+    $Seeds_growing.delete(self)
+    $game_actors[planter_id].learn_skill(plant_id)
+    $game_actors[planter_id].forget_skill(harvest_id)
+    $game_actors[planter_id].mp += 1
+  end
+  
+end
+
+#===============================================================================
+# ** Seed skill functions
+#===============================================================================
+#
+#-------------------------------------------------------------------------------
+# * Moon & Stars dispel
+#-------------------------------------------------------------------------------
+def dispel_moonstars()
+  $game_party.battle_members.each { |battler| battler.clear_states }
+  $game_party.clear_results
+end

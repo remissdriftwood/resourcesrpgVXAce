@@ -1,0 +1,12 @@
+# -----------------------------------------------------------------------------
+# Adds an accessor to easily print text to the battle log
+# -----------------------------------------------------------------------------
+# INSTRUCTIONS: Use this to add text to battle window:
+#
+#               SceneManager.scene.log_window.add_text("Ham!")
+#               SceneManager.scene.log_window.wait
+#
+# -----------------------------------------------------------------------------
+class Scene_Battle < Scene_Base
+  attr_accessor:log_window
+end

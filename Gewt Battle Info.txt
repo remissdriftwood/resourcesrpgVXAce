@@ -1,0 +1,217 @@
+#==============================================================================
+# Get Battle Info [VXA]
+# Author: Mesiah A.K.A. Mako Infused
+# Version: 1.04
+# Contact: www.cetrastudios.com/
+#------------------------------------------------------------------------------
+# ■ Short Description
+#------------------------------------------------------------------------------
+# This script allows the developer get more information about the current
+# battle without scripting. It allows you to retrieve information and use it
+# for eventing purposes.
+#
+#------------------------------------------------------------------------------
+# ͏ Notetags - 0
+#------------------------------------------------------------------------------
+# There is no notetag options for this script.
+#
+#------------------------------------------------------------------------------
+# ͏ Script Calls - 4
+#------------------------------------------------------------------------------
+# CALL: battle_info_user
+# HELP: This command will get the user of the current action in battle.
+# 
+# CALL: battle_info_used
+# HELP: This command will get the current action in battle.
+#
+# CALL: battle_info_targets
+# HELP: This command will get an array of all the current targets of the
+#       last skill used in battle. 
+#       Array starts at 1.
+# 
+# CALL: battle_info_all
+# HELP: This command will get an array of all the current battlers. 
+#       Array starts at 1.
+#
+# NOTE: To retrieve a single actor/enemy from an array you must append a [id]
+#       to the end of the script call. Examples can be found below!
+# 
+#------------------------------------------------------------------------------
+# ● Examples:
+#------------------------------------------------------------------------------
+# CALL: battle_info_user.id
+# HELP: This would retrieve the id of the current battler whose executing an
+#       action in battle.
+# 
+# CALL: battle_info_user.name
+# HELP: This would retrieve the name of the current battler whose executing an
+#       action in battle.
+# 
+# CALL: battle_info_used.id
+# HELP: This would retrieve the id of the current action that has been executed
+#       in battle.
+#
+# CALL: battle_info_all[1].name
+# HELP: This would retrieve the name of the first battler in the battle.
+#
+# CALL: battle_info_targets[1].name
+# HELP: This would retrieve the name of the first target of the last executed
+#       action in battle.
+# 
+#------------------------------------------------------------------------------
+# ● Customization:
+#------------------------------------------------------------------------------
+# There is no customization options for this script.
+#------------------------------------------------------------------------------
+# ● Requirements:
+#------------------------------------------------------------------------------
+# None
+#------------------------------------------------------------------------------
+# * Terms:
+#------------------------------------------------------------------------------
+# - Don't claim you made this script.
+# - Credit is appreciated, but not necessary.
+#------------------------------------------------------------------------------
+# ● Change Log:
+#------------------------------------------------------------------------------
+# 04/10/2013 - Target retrieval is now possible, error prevention added.
+# 04/09/2013 - Rewrote script and made script calls shorter.
+# 04/08/2013 - Fixed a type-o, prevented misuse of the script outside of battle.
+# 04/05/2013 - Started and finished script.
+#==============================================================================
+
+#==============================================================================
+# [STOP] End of Edittable Area
+#==============================================================================
+
+$imported = {} if $imported.nil?
+$imported["MESI-GetBattleInfo"] = true
+
+#==============================================================================
+# ** BattleManager
+#==============================================================================
+
+module BattleManager
+  
+  #--------------------------------------------------------------------------
+  # * Alias Create Action Order
+  #--------------------------------------------------------------------------
+  class <<self; alias mesiah_gbi_make_action_orders  make_action_orders; end
+  def self.make_action_orders
+    $game_temp.battle_skill_all = mesiah_gbi_make_action_orders.dup
+  end
+ 
+end
+
+#==============================================================================
+# ** Game_Temp
+#==============================================================================
+
+class Game_Temp
+  
+  #--------------------------------------------------------------------------
+  # * Public Instance Variables
+  #--------------------------------------------------------------------------
+  attr_accessor :battle_skill_user
+  attr_accessor :battle_skill_used
+  attr_accessor :battle_skill_all
+  attr_accessor :battle_skill_targets
+  
+  #--------------------------------------------------------------------------
+  # * Alias Method: Initialize
+  #--------------------------------------------------------------------------
+  alias mesiah_gbi_initialize initialize
+  def initialize
+    mesiah_gbi_initialize
+    @battle_skill_user = nil
+    @battle_skill_used = nil
+    @battle_skill_all = [nil]
+    @battle_skill_targets = [nil]
+  end
+  
+end
+
+#==============================================================================
+# ** Game_Interpreter
+#==============================================================================
+
+class Game_Interpreter
+  
+  #--------------------------------------------------------------------------
+  # * Get Last User
+  #--------------------------------------------------------------------------
+  def battle_info_user
+    return if battle_only_error?
+    return $game_temp.battle_skill_user
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Last Used Item/Skill
+  #--------------------------------------------------------------------------
+  def battle_info_used
+    return if battle_only_error?
+    return $game_temp.battle_skill_used
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Get Last Targets
+  #--------------------------------------------------------------------------
+  def battle_info_targets
+    return if battle_only_error?
+    return $game_temp.battle_skill_targets
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Get All Current Battlers
+  #--------------------------------------------------------------------------
+  def battle_info_all
+    return if battle_only_error?
+    return [nil] + $game_temp.battle_skill_all
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Checks if the command is valid?
+  #--------------------------------------------------------------------------
+  def battle_only_error?
+    unless SceneManager.scene.class == Scene_Battle
+      message = "This script call can only be used in battle!"
+      if $imported["MESI-GetErrorInfo"]
+        event_script_error(2, message)
+      else
+        missing = "Install the script 'Get Error Info' for more information"
+        msgbox(message + "\n" + missing)
+      end
+      return true
+    end
+    return false
+  end
+  
+end
+
+#==============================================================================
+# ** Scene_Battle
+#==============================================================================
+
+class Scene_Battle
+  
+  #--------------------------------------------------------------------------
+  # * Alias Method: Use Item
+  #--------------------------------------------------------------------------
+  alias mesiah_gbi_use_item use_item
+  def use_item
+    $game_temp.battle_skill_user = @subject
+    $game_temp.battle_skill_used = @subject.current_action.item
+    $game_temp.battle_skill_targets = [nil]
+    mesiah_gbi_use_item
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Use Skill/Item
+  #--------------------------------------------------------------------------
+  alias mesiah_gbi_invoke_item invoke_item
+  def invoke_item(target, item)
+    $game_temp.battle_skill_targets.push(target)
+    mesiah_gbi_invoke_item(target, item)
+  end
+  
+end

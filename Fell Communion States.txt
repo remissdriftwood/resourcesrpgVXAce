@@ -1,0 +1,14 @@
+def fell_communion(user, target)
+  
+  #Get a random state id from a pool of applicable negative ailments
+  ailment_id = $States_ailments[rand($States_ailments.length)]
+  
+  #Add state to caster
+  $game_party.battle_members[user].add_state(ailment_id)
+  $game_party.clear_results
+
+  #Add state to recipient
+  $game_party.battle_members[target].add_state(ailment_id)
+  $game_party.clear_results
+
+  end

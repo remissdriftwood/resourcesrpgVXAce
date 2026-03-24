@@ -1,0 +1,35 @@
+# Fonts
+Font.default_name = ["Emulogic", "VL Gothic Regular", "VL PGothic Regular"]
+Font.default_size = 16
+Font.default_outline = false
+
+# Remove battle log background opacity
+class Window_BattleLog
+  def back_opacity
+    return 0
+  end
+end
+
+# Colors
+class Window_Base
+  
+  def normal_color;      text_color(29);  end;    # Normal
+  def system_color;      text_color(29);  end;    # System
+  def crisis_color;      text_color(29);  end;    # Crisis
+  def knockout_color;    text_color(30);  end;    # Knock out
+  def gauge_back_color;  text_color(0);   end;    # Gauge background
+  def hp_gauge_color1;   text_color(0);  end;    # HP gauge 1
+  def hp_gauge_color2;   text_color(0);  end;    # HP gauge 2
+  def mp_gauge_color1;   text_color(0);  end;    # MP gauge 1
+  def mp_gauge_color2;   text_color(0);  end;    # MP gauge 2
+  def mp_cost_color;     text_color(29);  end;    # TP cost
+  def power_up_color;    text_color(29);  end;    # Equipment power up
+  def power_down_color;  text_color(29);  end;    # Equipment power down
+  def tp_gauge_color1;   text_color(0);  end;    # TP gauge 1
+  def tp_gauge_color2;   text_color(0);  end;    # TP gauge 2
+  def tp_cost_color;     text_color(29);  end;    # TP cost
+    
+end
+    
+    
+    #return Color.new(255, 255, 255, 255)
