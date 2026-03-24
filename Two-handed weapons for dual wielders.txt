@@ -1,5 +1,5 @@
 #==============================================================================
-# ** Two-Handed Weapons for Dual Wielders
+# ** Two-Handed Weapons for Dual Wielders (Fixed)
 #------------------------------------------------------------------------------
 # This script prevents an actor with the "Dual Wield" feature from equipping 
 # another weapon if they are using a weapon defined as "Two-Handed" (like Guns).
@@ -44,24 +44,24 @@ class Game_Actor < Game_Battler
   end
   
   #--------------------------------------------------------------------------
-  # * Alias: Check if Equipment Slot is Locked
+  # * Alias: Check if Equipment Change is OK
   #--------------------------------------------------------------------------
-  alias :sh_twohanded_dw_equip_is_locked? :equip_is_locked?
-  def equip_is_locked?(slot_id)
+  alias :sh_twohanded_dw_equip_change_ok? :equip_change_ok?
+  def equip_change_ok?(slot_id)
     if dual_wield?
       # Lock Slot 1 if Slot 0 has a Two-Handed Weapon
       if slot_id == 1 && equips[0] && equips[0].is_a?(RPG::Weapon) && TwoHandedConfig::TWO_HANDED_WTYPES.include?(equips[0].wtype_id)
-        return true
+        return false # Returns false instead of true to tell the engine the slot is NOT okay to change
       end
       
       # Lock Slot 0 if Slot 1 has a Two-Handed Weapon
       if slot_id == 0 && equips[1] && equips[1].is_a?(RPG::Weapon) && TwoHandedConfig::TWO_HANDED_WTYPES.include?(equips[1].wtype_id)
-        return true
+        return false
       end
     end
     
-    # Run normal lock check for everything else
-    sh_twohanded_dw_equip_is_locked?(slot_id)
+    # Run normal check for everything else
+    sh_twohanded_dw_equip_change_ok?(slot_id)
   end
   
 end
