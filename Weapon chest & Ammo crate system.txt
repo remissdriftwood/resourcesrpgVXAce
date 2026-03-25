@@ -1,0 +1,94 @@
+#==============================================================================
+# ** Weapon Chest & Ammo Crate System
+#------------------------------------------------------------------------------
+# Bypasses weapon requirements for skills when specific states are active. 
+# Removes those states from the user after casting designated finisher skills.
+#==============================================================================
+
+module ChestConfig
+  #--------------------------------------------------------------------------
+  # * Configuration
+  #--------------------------------------------------------------------------
+  
+  # Skill IDs for the finishers
+  ARSENAL_BARRAGE_SKILL = 17
+  BULLET_STORM_SKILL    = 18
+  
+  # State IDs applied by the setup skills
+  WEAPON_CHEST_STATE    = 30
+  AMMO_CRATE_STATE      = 29
+  
+  # Weapon Type ID for Guns (Check the "Terms" tab in your Database)
+  # This ensures Ammo Crate only bypasses requirements for Gun abilities.
+  GUN_WTYPE_ID          = 5 
+  
+end
+
+#==============================================================================
+# ** Game_Actor
+#==============================================================================
+
+class Game_Actor < Game_Battler
+  
+  # Safety Check: Ensure we don't alias twice (Prevents F12 crashes)
+  unless method_defined?(:sh_chest_skill_wtype_ok?)
+    alias :sh_chest_skill_wtype_ok? :skill_wtype_ok?
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Override: Determine if Skill Weapon is Equipped
+  #--------------------------------------------------------------------------
+  def skill_wtype_ok?(skill)
+    # 1. Weapon Chest bypasses ALL weapon requirements
+    return true if state?(ChestConfig::WEAPON_CHEST_STATE)
+    
+    # 2. Ammo Crate bypasses requirements ONLY if the skill requires a Gun
+    if state?(ChestConfig::AMMO_CRATE_STATE)
+      wtype_1 = skill.required_wtype_id1
+      wtype_2 = skill.required_wtype_id2
+      if wtype_1 == ChestConfig::GUN_WTYPE_ID || wtype_2 == ChestConfig::GUN_WTYPE_ID
+        return true
+      end
+    end
+    
+    # 3. Otherwise, run the normal weapon check
+    sh_chest_skill_wtype_ok?(skill)
+  end
+  
+end
+
+#==============================================================================
+# ** Game_Battler
+#==============================================================================
+
+class Game_Battler < Game_BattlerBase
+  
+  # Safety Check: Ensure we don't alias twice
+  unless method_defined?(:sh_chest_use_item)
+    alias :sh_chest_use_item :use_item
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Override: Use Item/Skill Execution
+  #--------------------------------------------------------------------------
+  def use_item(item)
+    # Call original item cost/usage logic
+    sh_chest_use_item(item)
+    
+    # Check if the action being used is a Skill
+    if item.is_a?(RPG::Skill)
+      
+      # If user casts Arsenal Barrage, remove the Weapon Chest state
+      if item.id == ChestConfig::ARSENAL_BARRAGE_SKILL
+        remove_state(ChestConfig::WEAPON_CHEST_STATE) if respond_to?(:remove_state)
+      end
+      
+      # If user casts Bullet Storm, remove the Ammo Crate state
+      if item.id == ChestConfig::BULLET_STORM_SKILL
+        remove_state(ChestConfig::AMMO_CRATE_STATE) if respond_to?(:remove_state)
+      end
+      
+    end
+  end
+  
+end

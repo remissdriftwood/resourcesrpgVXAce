@@ -101,6 +101,8 @@ class Sprite_MenuCursor < Sprite_Base
   # update
   #--------------------------------------------------------------------------
   def update
+    # Add a safety check to stop updating if the sprite or window is disposed
+    return if self.disposed? || @window.nil? || @window.disposed?
     super
     update_visibility
     update_position
@@ -207,7 +209,8 @@ class Scene_Base
   # new method: dispose_menu_cursors
   #--------------------------------------------------------------------------
   def dispose_menu_cursors
-    @menu_cursors.each { |cursor| cursor.dispose }
+    @menu_cursors.each { |cursor| cursor.dispose unless cursor.disposed? }
+    @menu_cursors.clear # Empties the array so dead sprites aren't referenced
   end
   
   #--------------------------------------------------------------------------
