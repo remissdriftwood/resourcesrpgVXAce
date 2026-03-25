@@ -1,8 +1,9 @@
 #==============================================================================
 # ** Weapon Chest & Ammo Crate System
 #------------------------------------------------------------------------------
-# Bypasses weapon requirements for skills when specific states are active. 
+# Bypasses weapon requirements for skills when specific states are active.
 # Removes those states from the user after casting designated finisher skills.
+# Seals specific skills until the end of battle when finishers are used.
 #==============================================================================
 
 module ChestConfig
@@ -20,7 +21,13 @@ module ChestConfig
   
   # Weapon Type ID for Guns (Check the "Terms" tab in your Database)
   # This ensures Ammo Crate only bypasses requirements for Gun abilities.
-  GUN_WTYPE_ID          = 5 
+  GUN_WTYPE_ID          = 8 
+  
+  # Skills to seal when Arsenal Barrage is used
+  ARSENAL_SEALED_SKILLS = [5, 6, 7, 9, 10, 11, 16]
+  
+  # Skills to seal when Bullet Storm is used
+  BULLET_SEALED_SKILLS  = [12, 13, 14, 15]
   
 end
 
@@ -30,9 +37,19 @@ end
 
 class Game_Actor < Game_Battler
   
-  # Safety Check: Ensure we don't alias twice (Prevents F12 crashes)
+  #--------------------------------------------------------------------------
+  # * New Method: Track dynamically sealed skills during battle
+  #--------------------------------------------------------------------------
+  def dynamically_sealed_skills
+    @dynamically_sealed_skills ||= []
+  end
+  
+  # Safety Checks: Ensure we don't alias twice (Prevents F12 crashes)
   unless method_defined?(:sh_chest_skill_wtype_ok?)
     alias :sh_chest_skill_wtype_ok? :skill_wtype_ok?
+    alias :sh_chest_skill_sealed?   :skill_sealed?
+    alias :sh_chest_on_battle_end   :on_battle_end
+    alias :sh_chest_on_battle_start :on_battle_start
   end
   
   #--------------------------------------------------------------------------
@@ -53,6 +70,32 @@ class Game_Actor < Game_Battler
     
     # 3. Otherwise, run the normal weapon check
     sh_chest_skill_wtype_ok?(skill)
+  end
+
+  #--------------------------------------------------------------------------
+  # * Override: Determine if a skill is sealed
+  #--------------------------------------------------------------------------
+  def skill_sealed?(skill_id)
+    # Return true if the skill is in our temporary battle seal list
+    return true if dynamically_sealed_skills.include?(skill_id)
+    # Otherwise check normal trait seals
+    sh_chest_skill_sealed?(skill_id)
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Override: Battle Start (Clear seals just in case)
+  #--------------------------------------------------------------------------
+  def on_battle_start
+    sh_chest_on_battle_start
+    @dynamically_sealed_skills = []
+  end
+
+  #--------------------------------------------------------------------------
+  # * Override: Battle End (Clear seals to return skills to the user)
+  #--------------------------------------------------------------------------
+  def on_battle_end
+    sh_chest_on_battle_end
+    @dynamically_sealed_skills = []
   end
   
 end
@@ -78,14 +121,24 @@ class Game_Battler < Game_BattlerBase
     # Check if the action being used is a Skill
     if item.is_a?(RPG::Skill)
       
-      # If user casts Arsenal Barrage, remove the Weapon Chest state
+      # If user casts Arsenal Barrage
       if item.id == ChestConfig::ARSENAL_BARRAGE_SKILL
         remove_state(ChestConfig::WEAPON_CHEST_STATE) if respond_to?(:remove_state)
+        # Seal the respective skills for this specific actor
+        if self.is_a?(Game_Actor)
+          self.dynamically_sealed_skills.concat(ChestConfig::ARSENAL_SEALED_SKILLS)
+          self.dynamically_sealed_skills.uniq!
+        end
       end
       
-      # If user casts Bullet Storm, remove the Ammo Crate state
+      # If user casts Bullet Storm
       if item.id == ChestConfig::BULLET_STORM_SKILL
         remove_state(ChestConfig::AMMO_CRATE_STATE) if respond_to?(:remove_state)
+        # Seal the respective skills for this specific actor
+        if self.is_a?(Game_Actor)
+          self.dynamically_sealed_skills.concat(ChestConfig::BULLET_SEALED_SKILLS)
+          self.dynamically_sealed_skills.uniq!
+        end
       end
       
     end
