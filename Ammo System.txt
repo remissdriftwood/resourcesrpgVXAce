@@ -1,6 +1,6 @@
 =begin
 #==============================================================================
-# ** Fighter Ammo System
+# ** Ammo System
 #------------------------------------------------------------------------------
 # Author: Gemini
 # Date: March 2026
@@ -144,15 +144,24 @@ class Scene_Battle < Scene_Base
           next if weapon.nil?
           
           if weapon.is_gun?
-            if @subject.ammo[index] <= 0
+            # Check if Ammo Crate state is active
+            ammo_crate_active = defined?(ChestConfig) ? @subject.state?(ChestConfig::AMMO_CRATE_STATE) : false
+
+            if @subject.ammo[index] <= 0 && !ammo_crate_active
               # Reload if empty
               @subject.reload_gun(index)
               @log_window.add_text("#{@subject.name} reloads #{weapon.name}!")
               @log_window.wait
             else
               # Fire the gun
-              shots_fired = [@subject.ammo[index], weapon.shots].min
-              @subject.ammo[index] -= shots_fired
+              if ammo_crate_active
+                # Fire full weapon shots without consuming ammo
+                shots_fired = weapon.shots
+              else
+                # Standard ammo consumption
+                shots_fired = [@subject.ammo[index], weapon.shots].min
+                @subject.ammo[index] -= shots_fired
+              end
               
               # Use the correct animation based on the slot index
               anim_id = index == 0 ? @subject.atk_animation_id1 : @subject.atk_animation_id2
