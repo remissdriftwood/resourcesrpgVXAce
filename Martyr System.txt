@@ -1,0 +1,67 @@
+#==============================================================================
+# ** Martyr System
+#------------------------------------------------------------------------------
+# Defines the custom abilities and rules for the Martyr class.
+#==============================================================================
+
+module MartyrConfig
+  # Betraying Shards
+  BETRAYING_SHARDS_STATE = 43
+  BETRAYING_SHARDS_SKILL = 107
+end
+
+#==============================================================================
+# ** Scene_Battle
+#==============================================================================
+class Scene_Battle < Scene_Base
+  
+  # ---------------------------------------------------------------------------
+  # End of Turn Effects (Betraying Shards)
+  # ---------------------------------------------------------------------------
+  alias martyr_system_turn_end turn_end
+  def turn_end
+    resolve_martyr_turn_end_effects
+    martyr_system_turn_end
+  end
+
+  def resolve_martyr_turn_end_effects
+    # Grab all alive enemies at the start of the end-turn phase
+    enemies = $game_troop.alive_members
+    
+    enemies.each do |battler|
+      # Skip if the battler died from a previous enemy's shards
+      next unless battler.alive?
+      
+      if battler.state?(MartyrConfig::BETRAYING_SHARDS_STATE)
+        
+        skill = $data_skills[MartyrConfig::BETRAYING_SHARDS_SKILL]
+        
+        # Temporarily set the subject so battle log and damage methods work properly
+        @subject = battler
+        
+        # Display the skill usage in the battle log
+        @log_window.display_use_item(@subject, skill)
+        
+        # Determine targets: The enemy's allies (other enemies), excluding themselves
+        targets = $game_troop.alive_members.reject { |ally| ally == battler }
+        
+        if targets.empty?
+          @log_window.add_text("...But there was no one left to betray!")
+          @log_window.wait
+        else
+          # Show the skill animation on the targets
+          show_animation(targets, skill.animation_id)
+          
+          # Apply the skill effects to each target
+          targets.each do |target|
+            skill.repeats.times { invoke_item(target, skill) }
+          end
+        end
+        
+        @log_window.wait_and_clear
+        @subject = nil # Reset subject
+      end
+    end
+  end
+  
+end
