@@ -1,0 +1,271 @@
+#==============================================================================
+# ** Knight System
+#------------------------------------------------------------------------------
+# Defines the custom abilities and rules for the Knight class.
+#==============================================================================
+
+module KnightConfig
+  # Runic Gleam
+  RUNIC_GLEAM_STATE = 55
+  
+  # Feedback
+  FEEDBACK_SKILL = 23 
+  
+  # Shield Skills
+  SHIELD_SKILLS = [28, 29]
+  
+  # For a hamburger today
+  HAMBURGER_SKILL = 30
+end
+
+#==============================================================================
+# ** Game_Battler
+#==============================================================================
+class Game_Battler < Game_BattlerBase
+  
+  # Feedback Variables
+  attr_accessor :feedback_target
+  attr_accessor :feedback_damage
+  attr_accessor :feedback_active
+  
+  # Hamburger Variables
+  attr_accessor :hamburger_active
+  attr_accessor :hamburger_phys
+  attr_accessor :hamburger_mag
+  attr_accessor :hamburger_true
+  attr_accessor :hamburger_absorbed
+
+  alias knight_system_initialize initialize
+  def initialize
+    knight_system_initialize
+    @feedback_active = false
+    @feedback_damage = 0
+    @feedback_target = nil
+    
+    @hamburger_active = false
+    @hamburger_phys = 0
+    @hamburger_mag = 0
+    @hamburger_true = 0
+    @hamburger_absorbed = false
+  end
+
+  # ---------------------------------------------------------------------------
+  # Intercept Damage Calculation (For Hamburger)
+  # ---------------------------------------------------------------------------
+  alias knight_system_make_damage_value make_damage_value
+  def make_damage_value(user, item)
+    knight_system_make_damage_value(user, item)
+    
+    @hamburger_absorbed = false
+    
+    # If the target is an actor taking damage, check if Hamburger is active
+    if self.actor? && @result.hp_damage > 0
+      knight = $game_party.battle_members.find { |m| m.hamburger_active && m.alive? }
+      
+      if knight
+        # Store the damage in the respective pool based on Hit Type
+        if item.physical?
+          knight.hamburger_phys += @result.hp_damage
+        elsif item.magical?
+          knight.hamburger_mag += @result.hp_damage
+        else
+          knight.hamburger_true += @result.hp_damage # Certain hit
+        end
+        
+        # Negate the damage for the original target
+        @result.hp_damage = 0
+        @hamburger_absorbed = true
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Intercept Skill Usage and Feedback Damage Storage
+  # ---------------------------------------------------------------------------
+  alias knight_system_item_apply item_apply
+  def item_apply(user, item)
+    knight_system_item_apply(user, item)
+    
+    if item.is_a?(RPG::Skill)
+      # 1. Feedback Activation
+      if item.id == KnightConfig::FEEDBACK_SKILL
+        user.feedback_active = true
+        user.feedback_target = self
+        user.feedback_damage = 0
+      end
+      
+      # 2. Hamburger Activation
+      if item.id == KnightConfig::HAMBURGER_SKILL
+        user.hamburger_active = true
+        user.hamburger_phys = 0
+        user.hamburger_mag = 0
+        user.hamburger_true = 0
+      end
+    end
+    
+    # 3. Feedback Magic Damage Tracking
+    if @feedback_active && item && item.magical?
+      if @result.hp_damage > 0
+        @feedback_damage += @result.hp_damage
+      end
+    end
+  end
+  
+end
+
+#==============================================================================
+# ** Game_Actor
+#==============================================================================
+class Game_Actor < Game_Battler
+  
+  # ---------------------------------------------------------------------------
+  # Shield Skills - Restrict usage based on equipment
+  # ---------------------------------------------------------------------------
+  alias knight_shield_skill_conditions_met? skill_conditions_met?
+  def skill_conditions_met?(skill)
+    return false unless knight_shield_skill_conditions_met?(skill)
+    
+    if KnightConfig::SHIELD_SKILLS.include?(skill.id)
+      return false unless equips[1].is_a?(RPG::Armor)
+    end
+    
+    return true
+  end
+  
+end
+
+#==============================================================================
+# ** Game_Action
+#==============================================================================
+class Game_Action
+  
+  # ---------------------------------------------------------------------------
+  # Runic Gleam - Redirect magical targets
+  # ---------------------------------------------------------------------------
+  alias knight_system_make_targets make_targets
+  def make_targets
+    targets = knight_system_make_targets
+    
+    if item.is_a?(RPG::Skill) && item.magical?
+      runic_knight = $game_party.battle_members.find do |battler|
+        battler.state?(KnightConfig::RUNIC_GLEAM_STATE)
+      end
+      
+      if runic_knight && runic_knight.alive?
+        targets = [runic_knight]
+      end
+    end
+    
+    return targets
+  end
+  
+end
+
+#==============================================================================
+# ** Scene_Battle
+#==============================================================================
+class Scene_Battle < Scene_Base
+  
+  # ---------------------------------------------------------------------------
+  # End of Turn Effects (Feedback & Hamburger)
+  # ---------------------------------------------------------------------------
+  alias knight_system_turn_end turn_end
+  def turn_end
+    resolve_knight_turn_end_effects
+    knight_system_turn_end
+  end
+
+  def resolve_knight_turn_end_effects
+    all_battlers = $game_party.battle_members + $game_troop.members
+    
+    all_battlers.each do |battler|
+      next unless battler.alive?
+      
+      # --- RESOLVE FEEDBACK ---
+      if battler.feedback_active
+        @log_window.add_text("#{battler.name} erupts in a brilliant flash!")
+        @log_window.wait
+        
+        target = battler.feedback_target
+        if target && target.dead?
+          target = target.is_a?(Game_Enemy) ? $game_troop.random_target : $game_party.random_target
+        end
+        
+        if battler.feedback_damage > 0 && target && target.alive?
+          damage = battler.feedback_damage
+          target.hp -= damage
+          @log_window.add_text("#{target.name} takes #{damage} damage!")
+          @log_window.wait
+          target.perform_collapse_effect if target.dead?
+        else
+          @log_window.add_text("...But nothing happens!")
+          @log_window.wait
+        end
+        
+        @log_window.wait_and_clear
+        battler.feedback_active = false
+        battler.feedback_damage = 0
+        battler.feedback_target = nil
+      end
+      
+      # --- RESOLVE HAMBURGER ---
+      if battler.hamburger_active
+        # The Knight now takes the pure, unmitigated damage absorbed from the party
+        total = battler.hamburger_phys + battler.hamburger_mag + battler.hamburger_true
+        
+        if total > 0
+          @log_window.add_text("#{battler.name} absorbs the party's delayed damage!")
+          @log_window.wait
+          
+          battler.hp -= total
+          @log_window.add_text("#{battler.name} takes #{total} damage!")
+          @log_window.wait
+          
+          battler.perform_collapse_effect if battler.dead?
+        end
+        
+        @log_window.wait_and_clear
+        battler.hamburger_active = false
+        battler.hamburger_phys = 0
+        battler.hamburger_mag = 0
+        battler.hamburger_true = 0
+      end
+      
+    end
+  end
+  
+end
+
+#==============================================================================
+# ** Window_BattleLog
+#==============================================================================
+class Window_BattleLog < Window_Selectable
+  
+  # ---------------------------------------------------------------------------
+  # Suppress "Took no damage!" or normal fail messages for setup skills
+  # ---------------------------------------------------------------------------
+  alias knight_system_display_action_results display_action_results
+  def display_action_results(target, item)
+    if item.is_a?(RPG::Skill)
+      if item.id == KnightConfig::FEEDBACK_SKILL || item.id == KnightConfig::HAMBURGER_SKILL
+        return
+      end
+    end
+    knight_system_display_action_results(target, item)
+  end
+
+  # ---------------------------------------------------------------------------
+  # Display a custom message when Hamburger intercepts an attack
+  # ---------------------------------------------------------------------------
+  alias knight_system_display_hp_damage display_hp_damage
+  def display_hp_damage(target, item)
+    if target.hamburger_absorbed
+      add_text("Damage delayed by For a hamburger today!")
+      wait
+      target.hamburger_absorbed = false
+      return
+    end
+    knight_system_display_hp_damage(target, item)
+  end
+  
+end
