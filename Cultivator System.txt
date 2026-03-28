@@ -53,6 +53,13 @@ module CultivatorConfig
   
   # Notetag to add to any Skill/Item note box to consume the active element
   EXPEND_NOTETAG = /<expend element>/i
+  
+  # --- SWORD ON A STRING ---
+  SWORDLESS_STATE_ID = 60
+  
+  # The animation that plays on the enemy when the flying sword hits them. 
+  # (1 is usually the basic sword slash)
+  FLYING_SWORD_ANIM_ID = 1
 end
 
 #===============================================================================
@@ -406,7 +413,6 @@ class Game_Battler < Game_BattlerBase
   def item_cri(user, item)
     base_cri = cultivator_item_cri(user, item)
     if user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
-      # 1, 2, 5, 6 are the damage types for dealing HP/MP damage and drain (Offensive)
       if user.cultivator_element == :fire && [1, 2, 5, 6].include?(item.damage.type)
         base_cri += (user.mat * CultivatorConfig::FIRE_CRIT_MULTI)
       end
@@ -422,11 +428,8 @@ class Game_Battler < Game_BattlerBase
     cultivator_make_damage_value(user, item)
     
     if user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
-      # Only process if they actually dealt HP damage
       if user.cultivator_element == :earth && @result.hp_damage > 0
-        # Target's HP ratio (1.0 = full, 0.0 = empty)
         hp_ratio = self.mhp > 0 ? (self.hp.to_f / self.mhp) : 0.0
-        
         max_bonus = user.mat * CultivatorConfig::EARTH_MAX_MULTI
         applied_bonus = max_bonus * hp_ratio
         
@@ -436,21 +439,45 @@ class Game_Battler < Game_BattlerBase
   end
   
   #-----------------------------------------------------------------------------
-  # * METAL: Apply Debuff State
+  # * METAL, WATER, WOOD: Apply Per-Hit Effects
   #-----------------------------------------------------------------------------
   alias cultivator_item_apply item_apply
   def item_apply(user, item)
     cultivator_item_apply(user, item)
     
     if @result.hit? && user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
-      # Only apply on offensive moves
-      if user.cultivator_element == :metal && [1, 2, 5, 6].include?(item.damage.type)
-        apply_chance = user.mat * CultivatorConfig::METAL_CHANCE_MULTI
-        if rand(100) < apply_chance
-          self.add_state(CultivatorConfig::METAL_STATE_ID)
-          # Update the result so it shows in the battle log
-          @result.added_states.push(CultivatorConfig::METAL_STATE_ID) unless @result.added_states.include?(CultivatorConfig::METAL_STATE_ID)
+      element = user.cultivator_element
+      
+      # Only apply these effects if it's an offensive move doing HP/MP damage
+      if [1, 2, 5, 6].include?(item.damage.type)
+        
+        # METAL - Debuff
+        if element == :metal
+          apply_chance = user.mat * CultivatorConfig::METAL_CHANCE_MULTI
+          if rand(100) < apply_chance
+            self.add_state(CultivatorConfig::METAL_STATE_ID)
+            @result.added_states.push(CultivatorConfig::METAL_STATE_ID) unless @result.added_states.include?(CultivatorConfig::METAL_STATE_ID)
+          end
+          
+        # WOOD - Self Heal
+        elsif element == :wood
+          heal_amount = (user.mat * CultivatorConfig::WOOD_MAT_MULTI).to_i
+          if heal_amount > 0 && user.alive?
+            user.hp += heal_amount
+            user.animation_id = CultivatorConfig::WOOD_ANIMATION_ID if CultivatorConfig::WOOD_ANIMATION_ID > 0
+          end
+          
+        # WATER - Party Heal
+        elsif element == :water
+          heal_amount = (user.mat * CultivatorConfig::WATER_MAT_MULTI).to_i
+          if heal_amount > 0
+            $game_party.battle_members.select { |m| m.alive? }.each do |target|
+              target.hp += heal_amount
+              target.animation_id = CultivatorConfig::WATER_ANIMATION_ID if CultivatorConfig::WATER_ANIMATION_ID > 0
+            end
+          end
         end
+        
       end
     end
   end
@@ -459,7 +486,7 @@ end
 
 #===============================================================================
 # ** Scene_Battle
-# Hooking into the end of an action to trigger healing and element expenditure
+# Hooking into the end of an action to trigger element expenditure
 #===============================================================================
 class Scene_Battle < Scene_Base
   
@@ -474,30 +501,6 @@ class Scene_Battle < Scene_Base
       element = user.cultivator_element
       
       #-------------------------------------------------------------------------
-      # * WATER & WOOD: Post-Action Healing
-      #-------------------------------------------------------------------------
-      if element == :wood || element == :water
-        targets = (element == :wood) ? [user] : $game_party.battle_members.select { |m| m.alive? }
-        heal_amount = (user.mat * (element == :wood ? CultivatorConfig::WOOD_MAT_MULTI : CultivatorConfig::WATER_MAT_MULTI)).to_i
-        
-        if heal_amount > 0
-          targets.each do |target|
-            target.hp += heal_amount
-            anim_id = element == :wood ? CultivatorConfig::WOOD_ANIMATION_ID : CultivatorConfig::WATER_ANIMATION_ID
-            target.animation_id = anim_id if anim_id > 0
-          end
-          
-          # Split the text logs across two lines
-          line1 = element == :wood ? "#{user.name}'s Wood element" : "#{user.name}'s Water element"
-          line2 = element == :wood ? "restored health!" : "restored the party's health!"
-          
-          @log_window.add_text(line1)
-          @log_window.add_text(line2)
-          @log_window.wait
-        end
-      end
-      
-      #-------------------------------------------------------------------------
       # * EXPEND ELEMENT CHECK
       #-------------------------------------------------------------------------
       if item.expend_element? && element
@@ -506,7 +509,6 @@ class Scene_Battle < Scene_Base
         @log_window.add_text("elemental energy!")
         @log_window.wait
         
-        # Instantly updates the custom UI so it fades out
         @cultivator_element_window.refresh if @cultivator_element_window
       end
       
@@ -649,4 +651,111 @@ class Scene_ItemBase < Scene_MenuBase
       SceneManager.goto(Scene_Map)
     end
   end
+end
+
+# ------------------------------------------------------------------------------
+# Cultivator System - Requires Element Restriction
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** Configuration Update (Additions)
+#===============================================================================
+module CultivatorConfig
+  # Notetag to require an active element to use a skill
+  REQUIRES_ELEMENT_NOTETAG = /<requires element>/i
+end
+
+#===============================================================================
+# ** RPG::UsableItem
+# Adding the notetag reader for Requires Element
+#===============================================================================
+class RPG::UsableItem < RPG::BaseItem
+  def requires_element?
+    if @requires_element.nil?
+      @requires_element = (self.note =~ CultivatorConfig::REQUIRES_ELEMENT_NOTETAG) != nil
+    end
+    @requires_element
+  end
+end
+
+#===============================================================================
+# ** Game_Actor
+# Hooking into the usable? check to disable the skill if no element is present
+#===============================================================================
+class Game_Actor < Game_Battler
+  
+  alias cultivator_req_elem_usable usable?
+  def usable?(item)
+    # Check if the item is a skill/item that requires an element
+    if item.is_a?(RPG::UsableItem) && item.requires_element?
+      # If the actor's cultivator_element is nil, the skill cannot be used
+      return false if self.cultivator_element.nil?
+    end
+    
+    # Otherwise, proceed with normal usability checks (like MP cost, Earth Call cooldown, etc.)
+    cultivator_req_elem_usable(item)
+  end
+  
+end
+
+# ------------------------------------------------------------------------------
+# Cultivator System - Sword on a String
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** Scene_Battle
+# Hooking into the end of the turn to process the flying sword attacks
+#===============================================================================
+class Scene_Battle < Scene_Base
+  
+  #-----------------------------------------------------------------------------
+  # * Alias: Turn End
+  #   This runs after all battlers have taken their normal actions for the round
+  #-----------------------------------------------------------------------------
+  alias cultivator_sword_turn_end turn_end
+  def turn_end
+    # Run the flying sword logic before standard turn-end effects (like poison)
+    process_flying_swords 
+    cultivator_sword_turn_end
+  end
+  
+  #-----------------------------------------------------------------------------
+  # * Process Flying Swords
+  #-----------------------------------------------------------------------------
+  def process_flying_swords
+    # Check every party member in battle
+    $game_party.battle_members.each do |actor|
+      
+      # If they are alive and have the Swordless state
+      if actor.alive? && actor.state?(CultivatorConfig::SWORDLESS_STATE_ID)
+        
+        # Pick a random living enemy
+        target = $game_troop.alive_members.sample
+        next unless target # Failsafe in case all enemies are dead
+        
+        # 1. Announce the attack
+        @log_window.add_text("#{actor.name}'s flying sword")
+        @log_window.add_text("strikes #{target.name}!")
+        @log_window.wait
+        
+        # 2. Play the slash animation on the enemy
+        show_animation([target], CultivatorConfig::FLYING_SWORD_ANIM_ID)
+        
+        # 3. Create a ghost action using the actor's basic attack
+        action = Game_Action.new(actor)
+        action.set_attack
+        
+        # 4. Apply the attack directly to the target
+        #    (This correctly routes through the engine's standard hit/damage flow)
+        target.item_apply(actor, action.item)
+        
+        # 5. Show the damage numbers and display any applied states (like Metal)
+        target.perform_damage_effect
+        @log_window.display_action_results(target, action.item)
+        @log_window.wait
+        
+      end
+    end
+  end
+  
 end
