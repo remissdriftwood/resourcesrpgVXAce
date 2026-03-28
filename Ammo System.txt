@@ -181,3 +181,159 @@ class Game_Battler < Game_BattlerBase
   end
   
 end
+
+#==============================================================================
+# ** Game_Actor (Ammo Window Hooks)
+#==============================================================================
+class Game_Actor < Game_Battler
+  
+  #--------------------------------------------------------------------------
+  # * Check if the actor should display the ammo window
+  #--------------------------------------------------------------------------
+  def has_ammo_display?
+    weapons.compact.any? { |w| w.is_gun? }
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Get structured data for the ammo window
+  #   Returns an array of hashes. The size of the array dictates the
+  #   window height. Each hash contains the data needed for one row.
+  #--------------------------------------------------------------------------
+  def ammo_display_data
+    data = []
+    weapons.each_with_index do |weapon, index|
+      # Only grab data for equipped weapons that are actually guns
+      if weapon && weapon.is_gun?
+        data.push({
+          :icon_index   => weapon.icon_index,
+          :current_ammo => self.ammo[index],
+          :max_ammo     => weapon.max_ammo
+        })
+      end
+    end
+    return data
+  end
+  
+end
+
+#==============================================================================
+# ** Window_Ammo
+#------------------------------------------------------------------------------
+#  This window displays the ammo for equipped guns in battle.
+#  It dynamically resizes based on the number of guns equipped.
+#==============================================================================
+
+class Window_Ammo < Window_Base
+  
+  attr_reader :actor
+  
+  #--------------------------------------------------------------------------
+  # * Object Initialization
+  #   We now pass the command window and viewport directly to this window
+  #   so it can track them autonomously.
+  #--------------------------------------------------------------------------
+  def initialize(cmd_window, viewport)
+    super(0, 0, 128, fitting_height(1))
+    @cmd_window = cmd_window
+    @info_viewport = viewport
+    @actor = nil
+    self.openness = 0 
+    self.z = 200 
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Set Actor
+  #--------------------------------------------------------------------------
+  def actor=(actor)
+    return if @actor == actor 
+    @actor = actor
+    refresh
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Refresh
+  #--------------------------------------------------------------------------
+  def refresh
+    contents.clear
+    
+    unless @actor && @actor.has_ammo_display?
+      self.hide
+      self.openness = 0
+      return
+    end
+    
+    self.show
+    data = @actor.ammo_display_data
+    
+    new_height = fitting_height(data.size)
+    if self.height != new_height
+      self.height = new_height
+      create_contents 
+    end
+    
+    draw_ammo_data(data)
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Draw Ammo Data
+  #--------------------------------------------------------------------------
+  def draw_ammo_data(data)
+    reset_font_settings
+    
+    data.each_with_index do |ammo_hash, index|
+      y = index * line_height
+      draw_icon(ammo_hash[:icon_index], 0, y)
+      
+      text_x = 24 + 4
+      text_width = contents.width - text_x
+      ammo_text = "#{ammo_hash[:current_ammo]}/#{ammo_hash[:max_ammo]}"
+      
+      change_color(normal_color)
+      draw_text(text_x, y, text_width, line_height, ammo_text, 2)
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Update Frame
+  #   This runs autonomously 60 times a second, even during animations.
+  #--------------------------------------------------------------------------
+  def update
+    super
+    self.actor = BattleManager.actor
+    
+    if @cmd_window && @cmd_window.openness > 0 && @actor && @actor.has_ammo_display?
+      base_x = @info_viewport ? @info_viewport.rect.x : 0
+      base_y = @info_viewport ? @info_viewport.rect.y : 0
+      scroll_x = @info_viewport ? @info_viewport.ox : 0
+      scroll_y = @info_viewport ? @info_viewport.oy : 0
+      
+      self.x = base_x + @cmd_window.x + @cmd_window.width - self.width - scroll_x
+      self.y = base_y + @cmd_window.y - scroll_y - self.height
+      
+      self.openness = @cmd_window.openness
+      self.visible  = @cmd_window.visible
+    else
+      self.visible = false
+      self.openness = 0
+    end
+  end
+  
+end
+
+#==============================================================================
+# ** Scene_Battle (Ammo Window Integration)
+#==============================================================================
+class Scene_Battle < Scene_Base
+  
+  #--------------------------------------------------------------------------
+  # * Alias: Create Actor Command Window
+  #   We simply create the window and hand it the dependencies it needs.
+  #   No further aliases in the Scene are required!
+  #--------------------------------------------------------------------------
+  alias ammo_sys_create_actor_command_window create_actor_command_window
+  def create_actor_command_window
+    ammo_sys_create_actor_command_window
+    @ammo_window = Window_Ammo.new(@actor_command_window, @info_viewport)
+  end
+  
+end

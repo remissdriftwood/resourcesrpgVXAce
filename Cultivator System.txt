@@ -1,0 +1,652 @@
+# ------------------------------------------------------------------------------
+# Cultivator System - Script Calls & Actor Extensions
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** Configuration Update
+#===============================================================================
+module CultivatorConfig
+  CULTIVATOR_CLASS_IDS = [6] 
+  BASE_MP_RESTORE = 5
+  
+  ELIXIR_TYPES = {
+    :pill => 1.0, :root => 1.5, :spot => 2.0
+  }
+  
+  ELEMENT_NAMES = {
+    :water => "Water", :fire  => "Fire", :wood  => "Wood",
+    :earth => "Earth", :metal => "Metal"
+  }
+
+  # Icon IDs for each element
+  ELEMENT_ICONS = {
+    :water => 79, 
+    :fire  => 81, 
+    :wood  => 114,
+    :earth => 80, 
+    :metal => 16
+  }
+  
+  # --- NEW: ELEMENT COMBAT EFFECTS ---
+  
+  # WATER: Restores Party HP equal to MAT * multiplier
+  WATER_MAT_MULTI = 0.5
+  WATER_ANIMATION_ID = 41 # Animation played on party when healed
+  
+  # WOOD: Restores Self HP equal to MAT * multiplier
+  WOOD_MAT_MULTI = 1.5
+  WOOD_ANIMATION_ID = 41  # Animation played on self when healed
+  
+  # FIRE: Adds (MAT * multiplier) to Critical Hit Chance. 
+  # e.g., 0.0015 multi with 100 MAT = +0.15 (15% increased flat crit chance)
+  FIRE_CRIT_MULTI = 0.0015
+  
+  # EARTH: Adds damage based on target's current HP. Max bonus applies at 100% HP.
+  # Max Bonus = (MAT * multiplier). 
+  # e.g., 0.005 multi with 100 MAT = +0.5 (50% extra damage against full HP targets)
+  EARTH_MAX_MULTI = 0.005
+  
+  # METAL: Applies a State on hit. MAT scales the *chance* to apply the state.
+  # e.g., 0.5 multi with 100 MAT = 50% chance to apply per hit. 200 MAT = 100%.
+  METAL_STATE_ID = 10 # Change this to your actual DEF/MDF down state ID!
+  METAL_CHANCE_MULTI = 0.5
+  
+  # Notetag to add to any Skill/Item note box to consume the active element
+  EXPEND_NOTETAG = /<expend element>/i
+end
+
+#===============================================================================
+# ** Global variable containing all tracked elixirs across maps
+#===============================================================================
+$Game_Elixirs = {}
+
+#===============================================================================
+# ** Cultivator System Module
+#===============================================================================
+module CultivatorSystem
+  def self.process_elixir_cooldowns
+    $Game_Elixirs.delete_if do |id, elixir|
+      elixir.decrease_cooldown
+      elixir.ready? 
+    end
+  end
+end
+
+#===============================================================================
+# ** Game_Elixir class
+#===============================================================================
+class Game_Elixir
+  attr_accessor :id           
+  attr_accessor :type         
+  attr_accessor :element      
+  attr_accessor :cooldown     
+  
+  def initialize(id, type, element)
+    @id = id
+    @type = type
+    @element = element
+    @cooldown = 0
+  end
+  
+  def ready?
+    return @cooldown <= 0
+  end
+  
+  def consume
+    # Replaced the Range with the RGSS3 compatible randomizer
+    @cooldown = rand(3) + 4
+  end
+  
+  def decrease_cooldown
+    @cooldown -= 1 if @cooldown > 0
+  end
+  
+  def calculate_mp_restore(override_value = nil)
+    return :full if override_value == :full
+    return override_value if override_value.is_a?(Integer)
+    
+    base = CultivatorConfig::BASE_MP_RESTORE
+    multiplier = CultivatorConfig::ELIXIR_TYPES[@type] || 1.0
+    
+    return (base * multiplier).to_i
+  end
+end
+
+#===============================================================================
+# ** Game_Party
+# Hooking into the end of a battle to update our elixirs.
+#===============================================================================
+class Game_Party < Game_Unit
+  alias :cultivator_on_battle_end :on_battle_end
+  def on_battle_end
+    cultivator_on_battle_end
+    CultivatorSystem.process_elixir_cooldowns
+  end
+end
+
+#===============================================================================
+# ** Game_Actor
+# Adding a variable to track the Cultivator's current element
+#===============================================================================
+class Game_Actor < Game_Battler
+  attr_accessor :cultivator_element
+  
+  alias cultivator_setup setup
+  def setup(actor_id)
+    cultivator_setup(actor_id)
+    @cultivator_element = nil # Nil means no element imbued yet
+  end
+end
+
+#===============================================================================
+# ** DataManager
+# Ensuring the hash is created on new games and saved/loaded properly
+#===============================================================================
+module DataManager
+  class << self
+    alias cultivator_create_game_objects create_game_objects
+    alias cultivator_make_save_contents make_save_contents
+    alias cultivator_extract_save_contents extract_save_contents
+  end
+
+  def self.create_game_objects
+    cultivator_create_game_objects
+    $Game_Elixirs = {} 
+  end
+
+  def self.make_save_contents
+    contents = cultivator_make_save_contents
+    contents[:elixirs] = $Game_Elixirs
+    contents
+  end
+
+  def self.extract_save_contents(contents)
+    cultivator_extract_save_contents(contents)
+    $Game_Elixirs = contents[:elixirs] || {} 
+  end
+end
+
+#===============================================================================
+# ** Game_Interpreter
+# Adding the script call logic for field events
+#===============================================================================
+class Game_Interpreter
+  
+  def interact_elixir(type, element, override = nil)
+    $Game_Elixirs ||= {} 
+    
+    elixir_id = "#{@map_id}_#{@event_id}"
+    elixir = $Game_Elixirs[elixir_id]
+    
+    if elixir && !elixir.ready?
+      $game_message.add("The energy here has been exhausted.")
+      $game_message.add("#{elixir.cooldown} battles remaining until it restores.")
+      wait_for_message
+      return
+    end
+
+    cultivators = $game_party.battle_members.select do |actor| 
+      CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(actor.class_id)
+    end
+    
+    if cultivators.empty?
+      $game_message.add("There are no Cultivators in the party to absorb this.")
+      wait_for_message
+      return
+    end
+    
+    dummy_elixir = Game_Elixir.new(elixir_id, type, element)
+    mp_amount = dummy_elixir.calculate_mp_restore(override)
+    elixir_element_name = CultivatorConfig::ELEMENT_NAMES[element] || "Unknown"
+    
+    if mp_amount == :full
+      $game_message.add("This #{type} will fully restore MP")
+    else
+      $game_message.add("This #{type} will restore #{mp_amount} MP")
+    end
+    $game_message.add("and imbue the #{elixir_element_name} element.")
+    
+    setup_elixir_choices(["Consume", "Leave it"])
+    wait_for_message
+    
+    if @elixir_choice_result == 0
+      target_actor = nil
+      
+      if cultivators.size == 1
+        target_actor = cultivators[0]
+      else
+        $game_message.add("Who will consume the elixir?")
+        names = cultivators.map { |actor| actor.name }
+        names.push("Cancel")
+        
+        setup_elixir_choices(names)
+        wait_for_message
+        
+        if @elixir_choice_result < cultivators.size
+          target_actor = cultivators[@elixir_choice_result]
+        end
+      end
+      
+      if target_actor
+        process_elixir_consumption(dummy_elixir, target_actor, mp_amount)
+      end
+      
+    else
+      $Game_Elixirs.delete(elixir_id)
+    end
+  end
+  
+  def setup_elixir_choices(choices)
+    $game_message.choices.clear
+    choices.each { |c| $game_message.choices.push(c) }
+    $game_message.choice_cancel_type = choices.size 
+    @elixir_choice_result = nil
+    $game_message.choice_proc = Proc.new { |n| @elixir_choice_result = n }
+  end
+  
+  def process_elixir_consumption(elixir, actor, mp_amount)
+    if mp_amount == :full
+      actor.mp = actor.mmp
+    else
+      actor.mp += mp_amount
+    end
+    
+    actor.cultivator_element = elixir.element
+    elixir.consume
+    $Game_Elixirs[elixir.id] = elixir
+    
+    Sound.play_recovery
+    $game_message.add("#{actor.name} consumed the #{elixir.type}!")
+    wait_for_message
+  end
+  
+end
+
+# ------------------------------------------------------------------------------
+# Cultivator System - Battle UI
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** Window_CultivatorElement
+# Draws the active element autonomously above the actor command window.
+#===============================================================================
+class Window_CultivatorElement < Window_Base
+  
+  attr_reader :actor
+
+  #-----------------------------------------------------------------------------
+  # * Object Initialization
+  #-----------------------------------------------------------------------------
+  def initialize(cmd_window, viewport)
+    super(0, 0, window_width, fitting_height(1))
+    @cmd_window = cmd_window
+    @info_viewport = viewport
+    @actor = nil
+    self.openness = 0
+    self.z = 200
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Get Window Width
+  #-----------------------------------------------------------------------------
+  def window_width
+    return 128
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Set Actor
+  #-----------------------------------------------------------------------------
+  def actor=(actor)
+    return if @actor == actor
+    @actor = actor
+    refresh
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Refresh Contents
+  #-----------------------------------------------------------------------------
+  def refresh
+    contents.clear
+    return unless @actor
+    
+    # Always reset font settings before drawing to prevent color/opacity bleed
+    reset_font_settings 
+    
+    element = @actor.cultivator_element
+    if element
+      icon_index = CultivatorConfig::ELEMENT_ICONS[element] || 0
+      element_name = CultivatorConfig::ELEMENT_NAMES[element] || "Unknown"
+      
+      draw_icon(icon_index, 0, 0)
+      
+      # Explicitly set color and shift text slightly further right (28 instead of 24)
+      change_color(normal_color)
+      draw_text(28, 0, contents.width - 28, line_height, element_name)
+    else
+      change_color(system_color)
+      draw_text(0, 0, contents.width, line_height, "No Element", 1)
+      change_color(normal_color)
+    end
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Update Frame
+  #   Runs autonomously to track the command window's exact position.
+  #-----------------------------------------------------------------------------
+  def update
+    super
+    self.actor = BattleManager.actor
+    
+    # Check if the command window is active AND it is a Cultivator
+    if @cmd_window && @cmd_window.openness > 0 && @actor && 
+       CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(@actor.class_id)
+       
+      base_x = @info_viewport ? @info_viewport.rect.x : 0
+      base_y = @info_viewport ? @info_viewport.rect.y : 0
+      scroll_x = @info_viewport ? @info_viewport.ox : 0
+      scroll_y = @info_viewport ? @info_viewport.oy : 0
+      
+      # Snap to the top-left of the actor command window
+      self.x = base_x + @cmd_window.x - scroll_x
+      self.y = base_y + @cmd_window.y - scroll_y - self.height
+      
+      self.openness = @cmd_window.openness
+      self.visible  = @cmd_window.visible
+    else
+      self.visible = false
+      self.openness = 0
+    end
+  end
+end
+
+#===============================================================================
+# ** Scene_Battle (Cultivator Window Integration)
+#===============================================================================
+class Scene_Battle < Scene_Base
+  
+  #-----------------------------------------------------------------------------
+  # * Alias: Create Actor Command Window
+  #-----------------------------------------------------------------------------
+  alias cultivator_create_actor_command_window create_actor_command_window
+  def create_actor_command_window
+    cultivator_create_actor_command_window
+    # Pass the command window and viewport to the element window upon creation
+    @cultivator_element_window = Window_CultivatorElement.new(@actor_command_window, @info_viewport)
+  end
+  
+end
+
+# ------------------------------------------------------------------------------
+# Cultivator System - Combat Effects
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** RPG::UsableItem
+# Adding the notetag reader for expending elements
+#===============================================================================
+class RPG::UsableItem < RPG::BaseItem
+  def expend_element?
+    if @expend_element.nil?
+      @expend_element = (self.note =~ CultivatorConfig::EXPEND_NOTETAG) != nil
+    end
+    @expend_element
+  end
+end
+
+#===============================================================================
+# ** Game_Battler
+# Hooking into damage and critical hit calculations
+#===============================================================================
+class Game_Battler < Game_BattlerBase
+  
+  #-----------------------------------------------------------------------------
+  # * FIRE: Modify Critical Chance
+  #-----------------------------------------------------------------------------
+  alias cultivator_item_cri item_cri
+  def item_cri(user, item)
+    base_cri = cultivator_item_cri(user, item)
+    if user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
+      # 1, 2, 5, 6 are the damage types for dealing HP/MP damage and drain (Offensive)
+      if user.cultivator_element == :fire && [1, 2, 5, 6].include?(item.damage.type)
+        base_cri += (user.mat * CultivatorConfig::FIRE_CRIT_MULTI)
+      end
+    end
+    base_cri
+  end
+  
+  #-----------------------------------------------------------------------------
+  # * EARTH: Modify Damage Value
+  #-----------------------------------------------------------------------------
+  alias cultivator_make_damage_value make_damage_value
+  def make_damage_value(user, item)
+    cultivator_make_damage_value(user, item)
+    
+    if user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
+      # Only process if they actually dealt HP damage
+      if user.cultivator_element == :earth && @result.hp_damage > 0
+        # Target's HP ratio (1.0 = full, 0.0 = empty)
+        hp_ratio = self.mhp > 0 ? (self.hp.to_f / self.mhp) : 0.0
+        
+        max_bonus = user.mat * CultivatorConfig::EARTH_MAX_MULTI
+        applied_bonus = max_bonus * hp_ratio
+        
+        @result.hp_damage = (@result.hp_damage * (1.0 + applied_bonus)).to_i
+      end
+    end
+  end
+  
+  #-----------------------------------------------------------------------------
+  # * METAL: Apply Debuff State
+  #-----------------------------------------------------------------------------
+  alias cultivator_item_apply item_apply
+  def item_apply(user, item)
+    cultivator_item_apply(user, item)
+    
+    if @result.hit? && user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
+      # Only apply on offensive moves
+      if user.cultivator_element == :metal && [1, 2, 5, 6].include?(item.damage.type)
+        apply_chance = user.mat * CultivatorConfig::METAL_CHANCE_MULTI
+        if rand(100) < apply_chance
+          self.add_state(CultivatorConfig::METAL_STATE_ID)
+          # Update the result so it shows in the battle log
+          @result.added_states.push(CultivatorConfig::METAL_STATE_ID) unless @result.added_states.include?(CultivatorConfig::METAL_STATE_ID)
+        end
+      end
+    end
+  end
+  
+end
+
+#===============================================================================
+# ** Scene_Battle
+# Hooking into the end of an action to trigger healing and element expenditure
+#===============================================================================
+class Scene_Battle < Scene_Base
+  
+  alias cultivator_eff_use_item use_item
+  def use_item
+    cultivator_eff_use_item
+    
+    user = @subject
+    item = user.current_action.item
+    
+    if user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
+      element = user.cultivator_element
+      
+      #-------------------------------------------------------------------------
+      # * WATER & WOOD: Post-Action Healing
+      #-------------------------------------------------------------------------
+      if element == :wood || element == :water
+        targets = (element == :wood) ? [user] : $game_party.battle_members.select { |m| m.alive? }
+        heal_amount = (user.mat * (element == :wood ? CultivatorConfig::WOOD_MAT_MULTI : CultivatorConfig::WATER_MAT_MULTI)).to_i
+        
+        if heal_amount > 0
+          targets.each do |target|
+            target.hp += heal_amount
+            anim_id = element == :wood ? CultivatorConfig::WOOD_ANIMATION_ID : CultivatorConfig::WATER_ANIMATION_ID
+            target.animation_id = anim_id if anim_id > 0
+          end
+          
+          # Split the text logs across two lines
+          line1 = element == :wood ? "#{user.name}'s Wood element" : "#{user.name}'s Water element"
+          line2 = element == :wood ? "restored health!" : "restored the party's health!"
+          
+          @log_window.add_text(line1)
+          @log_window.add_text(line2)
+          @log_window.wait
+        end
+      end
+      
+      #-------------------------------------------------------------------------
+      # * EXPEND ELEMENT CHECK
+      #-------------------------------------------------------------------------
+      if item.expend_element? && element
+        user.cultivator_element = nil
+        @log_window.add_text("#{user.name} expended their")
+        @log_window.add_text("elemental energy!")
+        @log_window.wait
+        
+        # Instantly updates the custom UI so it fades out
+        @cultivator_element_window.refresh if @cultivator_element_window
+      end
+      
+    end
+  end
+  
+end
+
+# ------------------------------------------------------------------------------
+# Cultivator System - Earth Call Skill
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** Configuration Update (Additions)
+#===============================================================================
+module CultivatorConfig
+  # Notetag to identify the Earth Call skill
+  EARTH_CALL_NOTETAG = /<earth call>/i
+end
+
+#===============================================================================
+# ** RPG::UsableItem
+# Adding the notetag reader for Earth Call
+#===============================================================================
+class RPG::UsableItem < RPG::BaseItem
+  def is_earth_call?
+    if @is_earth_call.nil?
+      @is_earth_call = (self.note =~ CultivatorConfig::EARTH_CALL_NOTETAG) != nil
+    end
+    @is_earth_call
+  end
+end
+
+#===============================================================================
+# ** Game_Actor
+# Adding cooldown tracking and the Earth Call execution logic
+#===============================================================================
+class Game_Actor < Game_Battler
+  attr_accessor :earth_call_cooldown
+  
+  alias cultivator_ec_setup setup
+  def setup(actor_id)
+    cultivator_ec_setup(actor_id)
+    @earth_call_cooldown = 0
+  end
+  
+  alias cultivator_ec_on_battle_end on_battle_end
+  def on_battle_end
+    cultivator_ec_on_battle_end
+    @earth_call_cooldown ||= 0
+    @earth_call_cooldown -= 1 if @earth_call_cooldown > 0
+  end
+  
+  alias cultivator_ec_usable usable?
+  def usable?(item)
+    if item.is_a?(RPG::UsableItem) && item.is_earth_call?
+      @earth_call_cooldown ||= 0
+      # Prevent usage if the cooldown is active
+      return false if @earth_call_cooldown > 0
+    end
+    cultivator_ec_usable(item)
+  end
+  
+  def perform_earth_call
+    # 1. Pick a random element from our config
+    elements = CultivatorConfig::ELEMENT_NAMES.keys
+    new_element = elements[rand(elements.size)]
+    self.cultivator_element = new_element
+    
+    # 2. Calculate the MP restore using the :pill multiplier
+    base = CultivatorConfig::BASE_MP_RESTORE
+    multiplier = CultivatorConfig::ELIXIR_TYPES[:pill] || 1.0
+    mp_amount = (base * multiplier).to_i
+    
+    # 3. Apply the MP and trigger the 1-battle cooldown
+    self.mp += mp_amount
+    @earth_call_cooldown = 1
+    
+    # Return the values so our message windows can read them
+    return mp_amount, CultivatorConfig::ELEMENT_NAMES[new_element]
+  end
+  
+  #-----------------------------------------------------------------------------
+  # * Bypass the engine's "Will this have an effect?" check for Earth Call
+  #-----------------------------------------------------------------------------
+  alias cultivator_ec_item_test item_test
+  def item_test(user, item)
+    # Force the engine to always accept Earth Call as a valid action
+    if item.is_a?(RPG::UsableItem) && item.is_earth_call?
+      return true 
+    end
+    # Otherwise, run the normal test
+    cultivator_ec_item_test(user, item)
+  end
+  
+end
+
+#===============================================================================
+# ** Scene_Battle
+# Executing Earth Call during combat
+#===============================================================================
+class Scene_Battle < Scene_Base
+  alias ec_use_item use_item
+  def use_item
+    ec_use_item
+    
+    user = @subject
+    item = user.current_action.item
+    
+    if item.is_earth_call? && user.is_a?(Game_Actor)
+      mp_amount, elem_name = user.perform_earth_call
+      
+      @log_window.add_text("#{user.name} channeled the earth!")
+      @log_window.add_text("Restored #{mp_amount} MP and imbued #{elem_name}!")
+      @log_window.wait
+      
+      # Instantly updates the custom UI so the new icon pops up
+      @cultivator_element_window.refresh if @cultivator_element_window
+    end
+  end
+end
+
+#===============================================================================
+# ** Scene_ItemBase 
+# Executing Earth Call from the menu (Field Map)
+#===============================================================================
+class Scene_ItemBase < Scene_MenuBase
+  alias ec_scene_itembase_use_item use_item
+  def use_item
+    ec_scene_itembase_use_item
+    
+    if item.is_earth_call? && user.is_a?(Game_Actor)
+      mp_amount, elem_name = user.perform_earth_call
+      
+      # Queue the message to display on the map
+      $game_message.add("#{user.name} channeled the earth!")
+      $game_message.add("Restored #{mp_amount} MP and imbued #{elem_name}!")
+      
+      # Force the menu to close so the player sees the message box immediately
+      SceneManager.goto(Scene_Map)
+    end
+  end
+end
