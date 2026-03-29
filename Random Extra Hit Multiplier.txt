@@ -1,0 +1,99 @@
+# ------------------------------------------------------------------------------
+# Random Extra Hit Multiplier
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** RPG::UsableItem
+# Adding the notetag reader for the random extra hit multiplier
+#===============================================================================
+class RPG::UsableItem < RPG::BaseItem
+  def random_extra_hit_multi
+    if @random_extra_hit_multi.nil?
+      # Looks for <random extra hit: 0.5> or <random extra hit: 1.0>
+      if self.note =~ /<random extra hit:\s*(\d+(?:\.\d+)?)>/i
+        @random_extra_hit_multi = $1.to_f
+      else
+        @random_extra_hit_multi = 0.0
+      end
+    end
+    @random_extra_hit_multi
+  end
+end
+
+#===============================================================================
+# ** Game_Actor
+# Adding a temporary flag to track the damage modifier
+#===============================================================================
+class Game_Actor < Game_Battler
+  attr_accessor :extra_hit_multiplier
+  
+  alias random_extra_setup setup
+  def setup(actor_id)
+    random_extra_setup(actor_id)
+    @extra_hit_multiplier = nil
+  end
+end
+
+#===============================================================================
+# ** Game_Battler
+# Hooking into damage calculations to apply the multiplier
+#===============================================================================
+class Game_Battler < Game_BattlerBase
+  alias random_extra_make_damage_value make_damage_value
+  def make_damage_value(user, item)
+    random_extra_make_damage_value(user, item)
+    
+    # If the user is an actor and currently has the multiplier flag active
+    if user.is_a?(Game_Actor) && user.extra_hit_multiplier
+      @result.hp_damage = (@result.hp_damage * user.extra_hit_multiplier).to_i
+      @result.mp_damage = (@result.mp_damage * user.extra_hit_multiplier).to_i
+    end
+  end
+end
+
+#===============================================================================
+# ** Scene_Battle
+# Hooking into the end of use_item to trigger the extra attack
+#===============================================================================
+class Scene_Battle < Scene_Base
+  alias random_extra_use_item use_item
+  def use_item
+    random_extra_use_item
+    
+    user = @subject
+    item = user.current_action.item
+    
+    # Check if the used item has the random extra hit notetag
+    if item.is_a?(RPG::UsableItem) && item.random_extra_hit_multi > 0 && user.is_a?(Game_Actor)
+      
+      # Pick a random living enemy
+      target = $game_troop.alive_members.sample
+      
+      if target
+        # 1. Set the damage multiplier flag
+        user.extra_hit_multiplier = item.random_extra_hit_multi
+        
+        # 2. Announce the follow-up and play the skill's animation again
+        @log_window.add_text("#{user.name} strikes a second time!")
+        @log_window.wait
+        show_animation([target], item.animation_id)
+        
+        # 3. Apply the item directly to the random target 
+        target.item_apply(user, item)
+        
+        # 4. Show the damage numbers and state results
+        target.perform_damage_effect
+        @log_window.display_action_results(target, item)
+        @log_window.wait
+        
+        # NEW: Check if Energy Swords should follow up the extra hit!
+        if respond_to?(:check_and_fire_energy_swords)
+          check_and_fire_energy_swords(user, target, item)
+        end
+        
+        # 5. Clear the damage multiplier flag so it doesn't affect future attacks
+        user.extra_hit_multiplier = nil
+      end
+    end
+  end
+end

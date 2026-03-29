@@ -60,6 +60,11 @@ module CultivatorConfig
   # The animation that plays on the enemy when the flying sword hits them. 
   # (1 is usually the basic sword slash)
   FLYING_SWORD_ANIM_ID = 1
+  
+  # --- ENERGY SWORDS ---
+  ENERGY_SWORDS_STATE_ID = 61
+  ENERGY_SWORD_ANIM_ID = 1
+  
 end
 
 #===============================================================================
@@ -625,7 +630,6 @@ class Scene_Battle < Scene_Base
       @log_window.add_text("Restored #{mp_amount} MP and imbued #{elem_name}!")
       @log_window.wait
       
-      # Instantly updates the custom UI so the new icon pops up
       @cultivator_element_window.refresh if @cultivator_element_window
     end
   end
@@ -720,40 +724,98 @@ class Scene_Battle < Scene_Base
   end
   
   #-----------------------------------------------------------------------------
-  # * Process Flying Swords
+  # * Process Flying Swords (UPDATED for Energy Swords)
   #-----------------------------------------------------------------------------
   def process_flying_swords
-    # Check every party member in battle
     $game_party.battle_members.each do |actor|
-      
-      # If they are alive and have the Swordless state
       if actor.alive? && actor.state?(CultivatorConfig::SWORDLESS_STATE_ID)
-        
-        # Pick a random living enemy
         target = $game_troop.alive_members.sample
-        next unless target # Failsafe in case all enemies are dead
+        next unless target 
         
-        # 1. Announce the attack
         @log_window.add_text("#{actor.name}'s flying sword")
         @log_window.add_text("strikes #{target.name}!")
         @log_window.wait
         
-        # 2. Play the slash animation on the enemy
         show_animation([target], CultivatorConfig::FLYING_SWORD_ANIM_ID)
         
-        # 3. Create a ghost action using the actor's basic attack
         action = Game_Action.new(actor)
         action.set_attack
         
-        # 4. Apply the attack directly to the target
-        #    (This correctly routes through the engine's standard hit/damage flow)
         target.item_apply(actor, action.item)
-        
-        # 5. Show the damage numbers and display any applied states (like Metal)
         target.perform_damage_effect
         @log_window.display_action_results(target, action.item)
         @log_window.wait
         
+        # NEW: Check if Energy Swords should follow up the flying sword!
+        check_and_fire_energy_swords(actor, target, action.item)
+      end
+    end
+  end
+  
+end
+
+# ------------------------------------------------------------------------------
+# Cultivator System - Energy Swords
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** Game_Actor
+# Adding the safety flag to prevent infinite attack loops
+#===============================================================================
+class Game_Actor < Game_Battler
+  attr_accessor :energy_sword_in_progress
+  
+  alias cultivator_es_setup setup
+  def setup(actor_id)
+    cultivator_es_setup(actor_id)
+    @energy_sword_in_progress = false
+  end
+end
+
+#===============================================================================
+# ** Scene_Battle
+# Hooking into skill execution to fire the swords
+#===============================================================================
+class Scene_Battle < Scene_Base
+  
+  #-----------------------------------------------------------------------------
+  # * Alias: Invoke Item (Runs for every individual hit of a skill)
+  #-----------------------------------------------------------------------------
+  alias cultivator_es_invoke_item invoke_item
+  def invoke_item(target, item)
+    cultivator_es_invoke_item(target, item)
+    check_and_fire_energy_swords(@subject, target, item)
+  end
+  
+  #-----------------------------------------------------------------------------
+  # * Check and Fire Energy Swords
+  #-----------------------------------------------------------------------------
+  def check_and_fire_energy_swords(user, target, item)
+    # 1. User is an actor with State 61
+    # 2. We are not currently in an infinite loop
+    # 3. The attack actually hit and dealt HP/MP damage (doesn't trigger on healing/buffs)
+    if user.is_a?(Game_Actor) && user.state?(CultivatorConfig::ENERGY_SWORDS_STATE_ID)
+      if !user.energy_sword_in_progress && target.result.hit? && [1, 2, 5, 6].include?(item.damage.type)
+        
+        # Turn ON safety flag
+        user.energy_sword_in_progress = true
+        
+        @log_window.add_text("Energy swords follow up!")
+        @log_window.wait
+        show_animation([target], CultivatorConfig::ENERGY_SWORD_ANIM_ID)
+        
+        # Create a basic attack action for the energy sword
+        action = Game_Action.new(user)
+        action.set_attack
+        
+        # Apply to target (This natively triggers your elements!)
+        target.item_apply(user, action.item)
+        target.perform_damage_effect
+        @log_window.display_action_results(target, action.item)
+        @log_window.wait
+        
+        # Turn OFF safety flag
+        user.energy_sword_in_progress = false
       end
     end
   end

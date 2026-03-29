@@ -1,0 +1,28 @@
+# ------------------------------------------------------------------------------
+# Random Skill Repeats
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** RPG::UsableItem
+# Overwriting the default repeats reader to allow for random ranges via notetag
+#===============================================================================
+class RPG::UsableItem < RPG::BaseItem
+  
+  def repeats
+    # Look for the notetag in the format <random repeats: X-Y>
+    if self.note =~ /<random repeats:\s*(\d+)\s*-\s*(\d+)>/i
+      min = $1.to_i
+      max = $2.to_i
+      
+      # Failsafe: if someone accidentally types <random repeats: 5-2>
+      min, max = max, min if min > max 
+      
+      # Roll the random number between min and max (inclusive)
+      return rand((max - min) + 1) + min
+    end
+    
+    # If the tag isn't there, just return the normal database value
+    return @repeats
+  end
+  
+end
