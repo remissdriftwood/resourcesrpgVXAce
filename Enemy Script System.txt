@@ -1,0 +1,138 @@
+#==============================================================================
+# Enemy Grid System
+#==============================================================================
+
+module EnemyGrid
+  #--------------------------------------------------------------------------
+  # Configuration Settings
+  #--------------------------------------------------------------------------
+  
+  # Set to true to display a popup box showing parsed enemy sizes on battle start.
+  # Turn to false once you verify the tags are working.
+  DEBUG_MODE = false
+  
+  # 1. SPRITE DIMENSIONS
+  BASE_SPRITE_WIDTH = 62  
+  BASE_SPRITE_HEIGHT = 62 
+  
+  CELL_WIDTH = BASE_SPRITE_WIDTH + 2
+  CELL_HEIGHT = BASE_SPRITE_HEIGHT + 2
+  
+  # 2. GRID PLACEMENT
+  GRID_START_X = (544 - (4 * CELL_WIDTH)) / 2
+  GRID_START_Y = 80 
+  
+  # 3. SIZE DEFINITIONS [Width, Height]
+  SIZES = {
+    "s"  => [1, 1],
+    "m"  => [1, 2], 
+    "l"  => [2, 2],
+    "xl" => [4, 2] 
+  }
+  
+  DEFAULT_SIZE = [1, 1] 
+end
+
+#==============================================================================
+# RPG::Enemy
+#==============================================================================
+class RPG::Enemy
+  def grid_size
+    if @note =~ /<grid\s*:\s*([a-z]+)\s*>/i
+      size_key = $1.downcase.strip
+      return EnemyGrid::SIZES[size_key] || EnemyGrid::DEFAULT_SIZE
+    else
+      return EnemyGrid::DEFAULT_SIZE
+    end
+  end
+end
+
+#==============================================================================
+# Game_Troop
+#==============================================================================
+class Game_Troop < Game_Unit
+  
+  alias :enemy_grid_layout_setup :setup
+  def setup(troop_id)
+    enemy_grid_layout_setup(troop_id)
+    debug_parsed_sizes if EnemyGrid::DEBUG_MODE
+    arrange_enemy_grid
+  end
+  
+  def debug_parsed_sizes
+    msg = "Grid Debug for Troop ID #{@troop_id}:\n\n"
+    @enemies.each do |e|
+      next if e.hidden?
+      w, h = e.enemy.grid_size
+      msg += "#{e.original_name}: [#{w}x#{h}]\n"
+    end
+    msgbox(msg)
+  end
+  
+  def arrange_enemy_grid
+    grid = Array.new(2) { Array.new(4, false) }
+    
+    active_enemies = @enemies.reject {|e| e.hidden? }
+    solitary_l_boss = (active_enemies.size == 1 && active_enemies[0].enemy.grid_size == [2, 2])
+    
+    # SORTING LOGIC: Largest Area first (XL -> L -> M -> S). 
+    # The index is used as a tie-breaker to respect Database troop order.
+    sorted_to_place = active_enemies.sort_by.with_index do |e, index|
+      w, h = e.enemy.grid_size
+      [-(w * h), index]
+    end
+    
+    sorted_to_place.each do |enemy|
+      w, h = enemy.enemy.grid_size
+      placed = false
+      
+      # Handle Solitary L Boss Override
+      if solitary_l_boss
+        x, y = 1, 0
+        target_x = EnemyGrid::GRID_START_X + (x * EnemyGrid::CELL_WIDTH) + (w * EnemyGrid::CELL_WIDTH / 2.0)
+        target_y = EnemyGrid::GRID_START_Y + (y * EnemyGrid::CELL_HEIGHT) + (h * EnemyGrid::CELL_HEIGHT)
+        
+        enemy.screen_x = target_x.round
+        enemy.screen_y = target_y.round
+        next 
+      end
+      
+      # Standard Iteration and Placement
+      for y in 0...(2 - h + 1)
+        for x in 0...(4 - w + 1)
+          
+          free = true
+          for dy in 0...h
+            for dx in 0...w
+              free = false if grid[y + dy][x + dx]
+            end
+          end
+          
+          if free
+            for dy in 0...h
+              for dx in 0...w
+                grid[y + dy][x + dx] = true
+              end
+            end
+            
+            target_x = EnemyGrid::GRID_START_X + (x * EnemyGrid::CELL_WIDTH) + (w * EnemyGrid::CELL_WIDTH / 2.0)
+            target_y = EnemyGrid::GRID_START_Y + (y * EnemyGrid::CELL_HEIGHT) + (h * EnemyGrid::CELL_HEIGHT)
+            
+            enemy.screen_x = target_x.round
+            enemy.screen_y = target_y.round
+            
+            placed = true
+            break 
+          end
+          
+        end
+        break if placed 
+      end
+      
+      unless placed
+        p "EnemyGrid Warning: Could not fit #{enemy.original_name} into the grid. Hiding sprite."
+        enemy.hide
+      end
+    end
+  end
+end
