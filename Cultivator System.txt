@@ -65,6 +65,10 @@ module CultivatorConfig
   ENERGY_SWORDS_STATE_ID = 61
   ENERGY_SWORD_ANIM_ID = 1
   
+  # --- YUANYING ---
+  YUANYING_STATE_ID = 62
+  YUANYING_ANIM_ID = 41 # Animation to play when the real Cultivator steps in (e.g., healing/revive anim)
+  
 end
 
 #===============================================================================
@@ -202,7 +206,8 @@ class Game_Interpreter
     end
     
     if cultivators.empty?
-      $game_message.add("There are no Cultivators in the party to absorb this.")
+      $game_message.add("Such auspicious spots require")
+      $game_message.add("a cultivator.")
       wait_for_message
       return
     end
@@ -817,6 +822,101 @@ class Scene_Battle < Scene_Base
         # Turn OFF safety flag
         user.energy_sword_in_progress = false
       end
+    end
+  end
+  
+end
+
+# ------------------------------------------------------------------------------
+# Cultivator System - Yuanying
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** RPG::UsableItem
+# Adding the notetag reader for the Yuanying skill
+#===============================================================================
+class RPG::UsableItem < RPG::BaseItem
+  def is_yuanying?
+    if @is_yuanying.nil?
+      @is_yuanying = (self.note =~ /<yuanying>/i) != nil
+    end
+    @is_yuanying
+  end
+end
+
+#===============================================================================
+# ** Game_BattlerBase & Game_Battler
+# Tracking the HP snapshot and intercepting the death sequence
+#===============================================================================
+class Game_BattlerBase
+  attr_accessor :yuanying_hp_snapshot
+  attr_accessor :yuanying_triggered
+end
+
+class Game_Battler < Game_BattlerBase
+  
+  #-----------------------------------------------------------------------------
+  # * Alias: Item Apply
+  #   Takes a snapshot of the user's HP exactly when they cast the skill
+  #-----------------------------------------------------------------------------
+  alias cultivator_yy_item_apply item_apply
+  def item_apply(user, item)
+    cultivator_yy_item_apply(user, item)
+    
+    # If the skill used was Yuanying, snapshot the target's HP
+    if @result.hit? && item.is_a?(RPG::UsableItem) && item.is_yuanying?
+      self.yuanying_hp_snapshot = self.hp
+    end
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Alias: Die
+  #   Let the engine clear states, but revive them instantly if they had State 62
+  #-----------------------------------------------------------------------------
+  alias cultivator_yy_die die
+  def die
+    # Check for the state BEFORE the engine clears everything
+    was_yuanying = state?(CultivatorConfig::YUANYING_STATE_ID)
+    snapshot = @yuanying_hp_snapshot || 1
+    
+    # Run normal death (Sets HP to 0, adds Death state, clears all other states)
+    cultivator_yy_die 
+    
+    # If they were protected, immediately revive them
+    if was_yuanying && self.is_a?(Game_Actor)
+      self.hp = snapshot
+      remove_state(death_state_id) # Removes State 1 (Death)
+      @yuanying_triggered = true   # Flag for the battle log
+    end
+  end
+  
+end
+
+#===============================================================================
+# ** Scene_Battle
+# Hooking into the attack phase to display the duplicate dying
+#===============================================================================
+class Scene_Battle < Scene_Base
+  
+  #-----------------------------------------------------------------------------
+  # * Alias: Invoke Item
+  #   Checks right after an attack lands if Yuanying was triggered
+  #-----------------------------------------------------------------------------
+  alias cultivator_yy_invoke_item invoke_item
+  def invoke_item(target, item)
+    cultivator_yy_invoke_item(target, item)
+    
+    if target.is_a?(Game_Actor) && target.yuanying_triggered
+      target.yuanying_triggered = false
+      
+      # Print the flavor text
+      @log_window.add_text("#{target.name}'s duplicate took the fatal blow!")
+      @log_window.add_text("#{target.name} steps in to take their place.")
+      @log_window.wait
+      
+      # Play animation and refresh HP bar
+      show_animation([target], CultivatorConfig::YUANYING_ANIM_ID)
+      @status_window.refresh 
     end
   end
   

@@ -1,0 +1,23 @@
+#==============================================================================
+# ** Seamless Title to Map BGM
+#------------------------------------------------------------------------------
+# Overwrites the default New Game command in Scene_Title to prevent the 
+# engine from killing the audio before transitioning to the first map.
+#==============================================================================
+
+class Scene_Title < Scene_Base
+  #--------------------------------------------------------------------------
+  # * [New Game] Command
+  #--------------------------------------------------------------------------
+  def command_new_game
+    DataManager.setup_new_game
+    close_command_window
+    
+    # Instead of 'fadeout_all' (which kills BGM/BGS), we only fade the graphics
+    # Graphics.frame_rate equals 1 second of fade time.
+    Graphics.fadeout(Graphics.frame_rate) 
+    
+    $game_map.autoplay
+    SceneManager.goto(Scene_Map)
+  end
+end
