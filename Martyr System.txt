@@ -8,6 +8,117 @@ module MartyrConfig
   # Betraying Shards
   BETRAYING_SHARDS_STATE = 43
   BETRAYING_SHARDS_SKILL = 107
+  
+  # Gout of Flame
+  GOUT_OF_FLAME_SKILL = 111
+  GOUT_OF_FLAME_STATE = 65
+  GOUT_INCREMENT = 1          # How much the multiplier increases per turn
+  GOUT_MAX_MULTIPLIER = 20    # The cap for the damage multiplier (*20)
+  
+  # Frost Orb
+  FROST_ORB_SUMMON_SKILL = 102  # The skill the player casts (No Damage)
+  FROST_ORB_PULSE_SKILL = 157   # The hidden skill the script casts (Deals Damage)
+  FROST_ORB_TURNS = 3           # How many turns the orb lasts
+  
+  # Circle of Darkness
+  CIRCLE_DARKNESS_SUMMON_SKILL = 112
+  CIRCLE_DARKNESS_ALLY_PULSE = 113
+  CIRCLE_DARKNESS_ENEMY_PULSE = 114
+  CIRCLE_DARKNESS_TURNS = 3
+  
+  # Circle of Immobility
+  CIRCLE_IMMOBILITY_SUMMON_SKILL = 115
+  CIRCLE_IMMOBILITY_ALLY_PULSE = 116
+  CIRCLE_IMMOBILITY_ENEMY_PULSE = 117
+  CIRCLE_IMMOBILITY_TURNS = 3
+end
+
+#==============================================================================
+# ** Game_Troop
+#------------------------------------------------------------------------------
+# Adding containers to track active field effects for the duration of the battle.
+#==============================================================================
+class Game_Troop < Game_Unit
+  attr_accessor :frost_orbs
+  attr_accessor :darkness_circles
+  attr_accessor :immobility_circles
+
+  alias martyr_system_troop_setup setup
+  def setup(troop_id)
+    martyr_system_troop_setup(troop_id)
+    # Reset the active field effects for every new battle
+    @frost_orbs = []
+    @darkness_circles = []
+    @immobility_circles = []
+  end
+end
+
+#==============================================================================
+# ** Game_Battler
+#==============================================================================
+class Game_Battler < Game_BattlerBase
+  attr_accessor :gout_target
+  attr_accessor :gout_multiplier
+
+  # Clean up variables at the end of battle
+  alias martyr_gout_on_battle_end on_battle_end
+  def on_battle_end
+    martyr_gout_on_battle_end
+    @gout_target = nil
+    @gout_multiplier = 1
+  end
+  
+  # Apply the multiplier to the damage calculation
+  alias martyr_gout_make_damage_value make_damage_value
+  def make_damage_value(user, item)
+    martyr_gout_make_damage_value(user, item)
+    if item.is_a?(RPG::Skill) && item.id == MartyrConfig::GOUT_OF_FLAME_SKILL
+      mult = user.gout_multiplier || 1
+      @result.hp_damage = (@result.hp_damage * mult).to_i
+      @result.mp_damage = (@result.mp_damage * mult).to_i
+    end
+  end
+end
+
+#==============================================================================
+# ** Game_Actor
+#==============================================================================
+class Game_Actor < Game_Battler
+  # Force auto-battle behavior when channeling so the menu skips them naturally
+  alias martyr_gout_auto_battle? auto_battle?
+  def auto_battle?
+    return true if state?(MartyrConfig::GOUT_OF_FLAME_STATE)
+    martyr_gout_auto_battle?
+  end
+  
+  # Force the specific channeling skill during auto-battle action generation
+  alias martyr_gout_make_auto_battle_actions make_auto_battle_actions
+  def make_auto_battle_actions
+    if state?(MartyrConfig::GOUT_OF_FLAME_STATE)
+      clear_actions
+      action = Game_Action.new(self)
+      action.set_skill(MartyrConfig::GOUT_OF_FLAME_SKILL)
+      @actions.push(action)
+      return
+    end
+    martyr_gout_make_auto_battle_actions
+  end
+end
+
+#==============================================================================
+# ** Game_Action
+#==============================================================================
+class Game_Action
+  # Force the skill to target the locked-on enemy when channeling
+  alias martyr_gout_make_targets make_targets
+  def make_targets
+    if item.is_a?(RPG::Skill) && item.id == MartyrConfig::GOUT_OF_FLAME_SKILL
+      if subject.state?(MartyrConfig::GOUT_OF_FLAME_STATE) && subject.gout_target
+        return [subject.gout_target]
+      end
+    end
+    martyr_gout_make_targets
+  end
 end
 
 #==============================================================================
@@ -16,12 +127,252 @@ end
 class Scene_Battle < Scene_Base
   
   # ---------------------------------------------------------------------------
-  # End of Turn Effects (Betraying Shards)
+  # General Skill Use Hooks (Summon Casts)
+  # ---------------------------------------------------------------------------
+  alias martyr_system_use_item use_item
+  def use_item
+    # Cache user and item before the action resolves to prevent crash bugs
+    user = @subject
+    item = user && user.current_action ? user.current_action.item : nil
+    
+    martyr_system_use_item
+    
+    return unless user && item
+    
+    if item.is_a?(RPG::Skill)
+      if item.id == MartyrConfig::FROST_ORB_SUMMON_SKILL
+        $game_troop.frost_orbs ||= []
+        $game_troop.frost_orbs << { user: user, turns: MartyrConfig::FROST_ORB_TURNS }
+        @log_window.add_text("A Frost Orb begins hovering over the battlefield!")
+        @log_window.wait
+      elsif item.id == MartyrConfig::CIRCLE_DARKNESS_SUMMON_SKILL
+        $game_troop.darkness_circles ||= []
+        $game_troop.darkness_circles << { user: user, turns: MartyrConfig::CIRCLE_DARKNESS_TURNS }
+        @log_window.add_text("A Circle of Darkness engulfs the battlefield!")
+        @log_window.wait
+      elsif item.id == MartyrConfig::CIRCLE_IMMOBILITY_SUMMON_SKILL
+        $game_troop.immobility_circles ||= []
+        $game_troop.immobility_circles << { user: user, turns: MartyrConfig::CIRCLE_IMMOBILITY_TURNS }
+        @log_window.add_text("A Circle of Immobility binds the battlefield!")
+        @log_window.wait
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # Gout of Flame Hooks (Execution Phase)
+  # ---------------------------------------------------------------------------
+  alias martyr_gout_execute_action execute_action
+  def execute_action
+    if @subject && @subject.state?(MartyrConfig::GOUT_OF_FLAME_STATE)
+      
+      # Only process these checks if the current action is actually Gout of Flame
+      if @subject.current_action && @subject.current_action.item && @subject.current_action.item.is_a?(RPG::Skill) && @subject.current_action.item.id == MartyrConfig::GOUT_OF_FLAME_SKILL
+        
+        skill = $data_skills[MartyrConfig::GOUT_OF_FLAME_SKILL]
+        target = @subject.gout_target
+        
+        # Check 1: Target missing or dead before the turn begins
+        if target.nil? || !target.alive?
+          @subject.remove_state(MartyrConfig::GOUT_OF_FLAME_STATE)
+          @subject.gout_target = nil
+          @subject.gout_multiplier = 1
+          @log_window.add_text("#{@subject.name}'s Gout of Flame ended - target died!")
+          @log_window.wait
+          @subject.clear_actions
+          return # Abort this action
+        end
+        
+        # Check 2: Out of MP before casting
+        if @subject.mp < @subject.skill_mp_cost(skill)
+          @subject.remove_state(MartyrConfig::GOUT_OF_FLAME_STATE)
+          @subject.gout_target = nil
+          @subject.gout_multiplier = 1
+          @log_window.add_text("#{@subject.name}'s Gout of Flame ended - out of MP!")
+          @log_window.wait
+          @subject.clear_actions
+          return # Abort this action
+        end
+        
+        # Passed checks! Increment multiplier for this turn's cast.
+        @subject.gout_multiplier ||= 1
+        @subject.gout_multiplier += MartyrConfig::GOUT_INCREMENT
+        if @subject.gout_multiplier > MartyrConfig::GOUT_MAX_MULTIPLIER
+          @subject.gout_multiplier = MartyrConfig::GOUT_MAX_MULTIPLIER
+        end
+        
+      end
+    end
+    
+    martyr_gout_execute_action
+  end
+
+  # ---------------------------------------------------------------------------
+  # Gout of Flame Hooks (Damage Phase)
+  # ---------------------------------------------------------------------------
+  alias martyr_gout_invoke_item invoke_item
+  def invoke_item(target, item)
+    # When the skill is cast normally (initial cast)
+    if item.is_a?(RPG::Skill) && item.id == MartyrConfig::GOUT_OF_FLAME_SKILL
+      if !@subject.state?(MartyrConfig::GOUT_OF_FLAME_STATE) && target.alive?
+        @subject.gout_target = target
+        @subject.gout_multiplier = 1
+        @subject.add_state(MartyrConfig::GOUT_OF_FLAME_STATE)
+      end
+    end
+    
+    martyr_gout_invoke_item(target, item)
+    
+    # Post-damage check to clear state IMMEDIATELY if target dies
+    if item.is_a?(RPG::Skill) && item.id == MartyrConfig::GOUT_OF_FLAME_SKILL
+      if @subject.gout_target && !@subject.gout_target.alive?
+        @subject.remove_state(MartyrConfig::GOUT_OF_FLAME_STATE)
+        @subject.gout_target = nil
+        @subject.gout_multiplier = 1
+      end
+    end
+  end
+
+  # ---------------------------------------------------------------------------
+  # End of Turn Effects
   # ---------------------------------------------------------------------------
   alias martyr_system_turn_end turn_end
   def turn_end
+    resolve_frost_orbs
+    resolve_darkness_circles
+    resolve_immobility_circles
+    cleanup_gout_of_flame
     resolve_martyr_turn_end_effects
     martyr_system_turn_end
+  end
+  
+  def resolve_frost_orbs
+    $game_troop.frost_orbs ||= []
+    return if $game_troop.frost_orbs.empty?
+    
+    skill = $data_skills[MartyrConfig::FROST_ORB_PULSE_SKILL]
+    original_subject = @subject 
+    
+    $game_troop.frost_orbs.each do |orb|
+      user = orb[:user]
+      targets = $game_troop.alive_members
+      next if targets.empty?
+      
+      @log_window.add_text("The Frost Orb fires icy shards!")
+      @log_window.wait
+      
+      show_animation(targets, skill.animation_id)
+      
+      targets.each do |target|
+        @subject = user
+        skill.repeats.times { invoke_item(target, skill) }
+      end
+      
+      orb[:turns] -= 1
+    end
+    
+    $game_troop.frost_orbs.reject! { |orb| orb[:turns] <= 0 }
+    @log_window.wait_and_clear
+    @subject = original_subject
+  end
+
+  def resolve_darkness_circles
+    $game_troop.darkness_circles ||= []
+    return if $game_troop.darkness_circles.empty?
+    
+    ally_skill = $data_skills[MartyrConfig::CIRCLE_DARKNESS_ALLY_PULSE]
+    enemy_skill = $data_skills[MartyrConfig::CIRCLE_DARKNESS_ENEMY_PULSE]
+    original_subject = @subject 
+    
+    $game_troop.darkness_circles.each do |circle|
+      user = circle[:user]
+      enemies = $game_troop.alive_members
+      allies = $game_party.alive_members
+      
+      @log_window.add_text("The Circle of Darkness pulses!")
+      @log_window.wait
+      
+      # Hit Enemies
+      unless enemies.empty?
+        show_animation(enemies, enemy_skill.animation_id)
+        enemies.each do |target|
+          @subject = user
+          enemy_skill.repeats.times { invoke_item(target, enemy_skill) }
+        end
+      end
+      
+      # Hit Allies
+      unless allies.empty?
+        show_animation(allies, ally_skill.animation_id)
+        allies.each do |target|
+          @subject = user
+          ally_skill.repeats.times { invoke_item(target, ally_skill) }
+        end
+      end
+      
+      circle[:turns] -= 1
+    end
+    
+    $game_troop.darkness_circles.reject! { |c| c[:turns] <= 0 }
+    @log_window.wait_and_clear
+    @subject = original_subject
+  end
+
+  def resolve_immobility_circles
+    $game_troop.immobility_circles ||= []
+    return if $game_troop.immobility_circles.empty?
+    
+    ally_skill = $data_skills[MartyrConfig::CIRCLE_IMMOBILITY_ALLY_PULSE]
+    enemy_skill = $data_skills[MartyrConfig::CIRCLE_IMMOBILITY_ENEMY_PULSE]
+    original_subject = @subject 
+    
+    $game_troop.immobility_circles.each do |circle|
+      user = circle[:user]
+      enemies = $game_troop.alive_members
+      allies = $game_party.alive_members
+      
+      @log_window.add_text("The Circle of Immobility pulses!")
+      @log_window.wait
+      
+      # Hit Enemies
+      unless enemies.empty?
+        show_animation(enemies, enemy_skill.animation_id)
+        enemies.each do |target|
+          @subject = user
+          enemy_skill.repeats.times { invoke_item(target, enemy_skill) }
+        end
+      end
+      
+      # Hit Allies
+      unless allies.empty?
+        show_animation(allies, ally_skill.animation_id)
+        allies.each do |target|
+          @subject = user
+          ally_skill.repeats.times { invoke_item(target, ally_skill) }
+        end
+      end
+      
+      circle[:turns] -= 1
+    end
+    
+    $game_troop.immobility_circles.reject! { |c| c[:turns] <= 0 }
+    @log_window.wait_and_clear
+    @subject = original_subject
+  end
+
+  def cleanup_gout_of_flame
+    battlers = $game_party.alive_members + $game_troop.alive_members
+    battlers.each do |battler|
+      if battler.state?(MartyrConfig::GOUT_OF_FLAME_STATE)
+        target = battler.gout_target
+        if target.nil? || !target.alive?
+          # Silently remove the state so they get their action menu next turn
+          battler.remove_state(MartyrConfig::GOUT_OF_FLAME_STATE)
+          battler.gout_target = nil
+          battler.gout_multiplier = 1
+        end
+      end
+    end
   end
 
   def resolve_martyr_turn_end_effects
@@ -31,7 +382,6 @@ class Scene_Battle < Scene_Base
     enemies.each do |battler|
       # Skip if the battler died from a previous enemy's shards
       next unless battler.alive?
-      
       if battler.state?(MartyrConfig::BETRAYING_SHARDS_STATE)
         
         skill = $data_skills[MartyrConfig::BETRAYING_SHARDS_SKILL]
