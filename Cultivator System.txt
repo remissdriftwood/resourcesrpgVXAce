@@ -69,6 +69,10 @@ module CultivatorConfig
   YUANYING_STATE_ID = 62
   YUANYING_ANIM_ID = 41 # Animation to play when the real Cultivator steps in (e.g., healing/revive anim)
   
+  # --- CALM MIND ---
+  CALM_MIND_STATE_ID = 64
+  CALM_MIND_NOTETAG = /<calm mind>/i
+  
 end
 
 #===============================================================================
@@ -180,6 +184,39 @@ module DataManager
     cultivator_extract_save_contents(contents)
     $Game_Elixirs = contents[:elixirs] || {} 
   end
+end
+
+#===============================================================================
+# ** Game_Party
+# Helper method to easily check for a Cultivator in the party
+#===============================================================================
+class Game_Party < Game_Unit
+  def has_cultivator?
+    battle_members.any? { |actor| CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(actor.class_id) }
+  end
+end
+
+#===============================================================================
+# ** Game_Event
+# Automatically hides Elixir events if no Cultivator is present
+#===============================================================================
+class Game_Event < Game_Character
+  
+  alias cultivator_elixir_conditions_met? conditions_met?
+  def conditions_met?(page)
+    # First, run the engine's normal page checks (Switches, Variables, Items)
+    return false unless cultivator_elixir_conditions_met?(page)
+    
+    # Check if the Event's Name contains "Elixir" (case-insensitive)
+    if @event.name =~ /elixir/i
+      # If there is no Cultivator, force the page condition to fail
+      return false unless $game_party.has_cultivator?
+    end
+    
+    # Otherwise, the page is valid
+    return true
+  end
+  
 end
 
 #===============================================================================
@@ -502,10 +539,14 @@ class Scene_Battle < Scene_Base
   
   alias cultivator_eff_use_item use_item
   def use_item
+    # Grab user and item BEFORE the action resolves
+    user = @subject
+    item = user && user.current_action ? user.current_action.item : nil
+    
     cultivator_eff_use_item
     
-    user = @subject
-    item = user.current_action.item
+    # Safely abort if the item was wiped during the action
+    return unless user && item
     
     if user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
       element = user.cultivator_element
@@ -513,7 +554,7 @@ class Scene_Battle < Scene_Base
       #-------------------------------------------------------------------------
       # * EXPEND ELEMENT CHECK
       #-------------------------------------------------------------------------
-      if item.expend_element? && element
+      if item.is_a?(RPG::UsableItem) && item.expend_element? && element
         user.cultivator_element = nil
         @log_window.add_text("#{user.name} expended their")
         @log_window.add_text("elemental energy!")
@@ -621,14 +662,19 @@ end
 # Executing Earth Call during combat
 #===============================================================================
 class Scene_Battle < Scene_Base
+  
   alias ec_use_item use_item
   def use_item
+    # Grab user and item BEFORE the action resolves
+    user = @subject
+    item = user && user.current_action ? user.current_action.item : nil
+    
     ec_use_item
     
-    user = @subject
-    item = user.current_action.item
+    # Safely abort if the item was wiped during the action
+    return unless user && item
     
-    if item.is_earth_call? && user.is_a?(Game_Actor)
+    if item.is_a?(RPG::UsableItem) && item.is_earth_call? && user.is_a?(Game_Actor)
       mp_amount, elem_name = user.perform_earth_call
       
       @log_window.add_text("#{user.name} channeled the earth!")
@@ -638,6 +684,7 @@ class Scene_Battle < Scene_Base
       @cultivator_element_window.refresh if @cultivator_element_window
     end
   end
+  
 end
 
 #===============================================================================
@@ -920,4 +967,96 @@ class Scene_Battle < Scene_Base
     end
   end
   
+end
+
+# ------------------------------------------------------------------------------
+# Cultivator System - Calm Mind
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** RPG::UsableItem
+# Adding the notetag reader for the Calm Mind skill
+#===============================================================================
+class RPG::UsableItem < RPG::BaseItem
+  def is_calm_mind?
+    if @is_calm_mind.nil?
+      @is_calm_mind = (self.note =~ CultivatorConfig::CALM_MIND_NOTETAG) != nil
+    end
+    @is_calm_mind
+  end
+end
+
+#===============================================================================
+# ** Game_Battler
+# Hooking into item application to wipe stats, and blocking incoming effects
+#===============================================================================
+class Game_Battler < Game_BattlerBase
+  
+  #-----------------------------------------------------------------------------
+  # * Alias: Item Apply
+  #   Cleanse the user right BEFORE Calm Mind applies its new state
+  #-----------------------------------------------------------------------------
+  alias cultivator_cm_item_apply item_apply
+  def item_apply(user, item)
+    # If the skill is Calm Mind and the user is casting it on themselves
+    if item.is_a?(RPG::UsableItem) && item.is_calm_mind? && user == self
+      
+      # 1. Wipe all current states (dup ensures we don't break the array while removing)
+      self.states.dup.each { |state| self.remove_state(state.id) }
+      
+      # 2. Wipe all buff and debuff parameter levels
+      self.clear_buffs
+    end
+    
+    # Proceed with the normal skill application (which will add State 64!)
+    cultivator_cm_item_apply(user, item)
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Immunity Hooks
+  #   Block effects from ANYONE other than the user if Calm Mind is active
+  #-----------------------------------------------------------------------------
+  
+  alias cultivator_cm_item_effect_add_state item_effect_add_state
+  def item_effect_add_state(user, item, effect)
+    return if self.state?(CultivatorConfig::CALM_MIND_STATE_ID) && user != self
+    cultivator_cm_item_effect_add_state(user, item, effect)
+  end
+
+  alias cultivator_cm_item_effect_remove_state item_effect_remove_state
+  def item_effect_remove_state(user, item, effect)
+    return if self.state?(CultivatorConfig::CALM_MIND_STATE_ID) && user != self
+    cultivator_cm_item_effect_remove_state(user, item, effect)
+  end
+
+  alias cultivator_cm_item_effect_add_buff item_effect_add_buff
+  def item_effect_add_buff(user, item, effect)
+    return if self.state?(CultivatorConfig::CALM_MIND_STATE_ID) && user != self
+    cultivator_cm_item_effect_add_buff(user, item, effect)
+  end
+
+  alias cultivator_cm_item_effect_add_debuff item_effect_add_debuff
+  def item_effect_add_debuff(user, item, effect)
+    return if self.state?(CultivatorConfig::CALM_MIND_STATE_ID) && user != self
+    cultivator_cm_item_effect_add_debuff(user, item, effect)
+  end
+
+  alias cultivator_cm_item_effect_remove_buff item_effect_remove_buff
+  def item_effect_remove_buff(user, item, effect)
+    return if self.state?(CultivatorConfig::CALM_MIND_STATE_ID) && user != self
+    cultivator_cm_item_effect_remove_buff(user, item, effect)
+  end
+
+  alias cultivator_cm_item_effect_remove_debuff item_effect_remove_debuff
+  def item_effect_remove_debuff(user, item, effect)
+    return if self.state?(CultivatorConfig::CALM_MIND_STATE_ID) && user != self
+    cultivator_cm_item_effect_remove_debuff(user, item, effect)
+  end
+
+  alias cultivator_cm_item_effect_grow item_effect_grow
+  def item_effect_grow(user, item, effect)
+    return if self.state?(CultivatorConfig::CALM_MIND_STATE_ID) && user != self
+    cultivator_cm_item_effect_grow(user, item, effect)
+  end
+
 end
