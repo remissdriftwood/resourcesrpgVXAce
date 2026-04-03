@@ -1,0 +1,25 @@
+#==============================================================================
+# Remove "Items" from Shop Sell Category
+#==============================================================================
+class Window_ItemCategory < Window_HorzCommand
+  
+  alias :shop_filter_make_command_list :make_command_list
+  def make_command_list
+    # Check if the player is currently in the shop scene
+    if SceneManager.scene_is?(Scene_Shop)
+      # Only add Weapons and Armor to the command list
+      add_command(Vocab::weapon, :weapon)
+      add_command(Vocab::armor,  :armor)
+    else
+      # Use the default behavior (Items, Weapons, Armor, Key Items) everywhere else
+      shop_filter_make_command_list
+    end
+  end
+  
+  alias :shop_filter_col_max :col_max
+  def col_max
+    # Adjust column size to 2 during shopping so the menu looks centered and balanced
+    SceneManager.scene_is?(Scene_Shop) ? 2 : shop_filter_col_max
+  end
+  
+end
