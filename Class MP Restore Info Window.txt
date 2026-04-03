@@ -1,0 +1,120 @@
+# ------------------------------------------------------------------------------
+# Class MP Restore Info Window - Battle UI
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** Configuration
+#===============================================================================
+module ClassMPConfig
+  # Text to display for each class ID
+  TEXT = {
+    1 => "Attack to gain 1 MP.",
+    2 => "Heal HP to gain 1 MP.",
+    3 => "Die to gain full MP.",
+    4 => "Harvest crops to gain 1 MP.",
+    5 => "Use items to gain 1 MP.",
+    6 => "Find auspicious spots to restore MP.",
+    7 => "Block to gain 1 MP."
+  }
+end
+
+#===============================================================================
+# ** Window_ClassMPInfo
+# Draws the MP restore conditions on the left side above the status window.
+#===============================================================================
+class Window_ClassMPInfo < Window_Base
+  attr_reader :actor
+
+  #-----------------------------------------------------------------------------
+  # * Object Initialization
+  #-----------------------------------------------------------------------------
+  def initialize(cmd_window, status_window, viewport)
+    super(0, 0, window_width, fitting_height(1))
+    @cmd_window = cmd_window
+    @status_window = status_window
+    @info_viewport = viewport
+    @actor = nil
+    self.openness = 0
+    self.z = 200
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Get Window Width
+  #-----------------------------------------------------------------------------
+  def window_width
+    return 340 # Wide enough to comfortably fit the longest text string
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Set Actor
+  #-----------------------------------------------------------------------------
+  def actor=(actor)
+    return if @actor == actor
+    @actor = actor
+    refresh
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Refresh Contents
+  #-----------------------------------------------------------------------------
+  def refresh
+    contents.clear
+    return unless @actor
+    
+    reset_font_settings
+    
+    # Fetch the text for the actor's class ID. Falls back to an empty string.
+    text = ClassMPConfig::TEXT[@actor.class_id] || ""
+    
+    # Draw the text left-aligned with a slight indent for readability
+    draw_text(4, 0, contents.width - 4, line_height, text, 0)
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Update Frame
+  #-----------------------------------------------------------------------------
+  def update
+    super
+    self.actor = BattleManager.actor
+    
+    # Sync visibility with the actor command window
+    if @cmd_window && @cmd_window.openness > 0 && @actor
+      
+      base_x = @info_viewport ? @info_viewport.rect.x : 0
+      base_y = @info_viewport ? @info_viewport.rect.y : 0
+      scroll_x = @info_viewport ? @info_viewport.ox : 0
+      scroll_y = @info_viewport ? @info_viewport.oy : 0
+      
+      # Anchor exactly to the left edge of the status window
+      self.x = base_x + @status_window.x - scroll_x
+      
+      # Rest exactly on top of the main status window
+      self.y = base_y + @status_window.y - scroll_y - self.height
+      
+      self.openness = @cmd_window.openness
+      self.visible  = @cmd_window.visible
+    else
+      self.visible = false
+      self.openness = 0
+    end
+  end
+end
+
+#===============================================================================
+# ** Scene_Battle Integration
+#===============================================================================
+class Scene_Battle < Scene_Base
+  
+  #-----------------------------------------------------------------------------
+  # * Alias: Create Actor Command Window
+  #-----------------------------------------------------------------------------
+  alias class_mp_info_create_actor_command_window create_actor_command_window
+  def create_actor_command_window
+    class_mp_info_create_actor_command_window
+    
+    # We pass both @actor_command_window and @status_window so the new UI 
+    # knows exactly when to open and where to position itself along the bottom.
+    @class_mp_info_window = Window_ClassMPInfo.new(@actor_command_window, @status_window, @info_viewport)
+  end
+  
+end
