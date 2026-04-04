@@ -1,0 +1,17 @@
+#==============================================================================
+# ** Map Name Single Gradient
+#------------------------------------------------------------------------------
+# Changes the map name background to start opaque on the left and fade to
+# transparent on the right.
+#==============================================================================
+
+class Window_MapName < Window_Base
+  #--------------------------------------------------------------------------
+  # * Draw Background
+  #--------------------------------------------------------------------------
+  def draw_background(rect)
+    # back_color1 is the opaque color, back_color2 is the transparent color.
+    # We draw one continuous gradient across the entire rect.
+    contents.gradient_fill_rect(rect, back_color1, back_color1)
+  end
+end

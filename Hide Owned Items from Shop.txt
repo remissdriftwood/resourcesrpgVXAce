@@ -1,0 +1,21 @@
+#==============================================================================
+# ** Hide Owned Items from Shop
+#------------------------------------------------------------------------------
+# Silently removes items from the shop's Buy window if the player 
+# already has them in their inventory or currently equipped.
+#==============================================================================
+
+class Window_ShopBuy < Window_Selectable
+  
+  alias :hide_owned_items_include? :include?
+  
+  def include?(shopGood)
+    # Check if the party has the item. 
+    # The 'true' argument ensures it also checks equipped weapons and armor.
+    return false if $game_party.has_item?(shopGood.item, true)
+    
+    # If not owned, proceed with the normal Shop Manager / Shop Stock checks
+    hide_owned_items_include?(shopGood)
+  end
+  
+end

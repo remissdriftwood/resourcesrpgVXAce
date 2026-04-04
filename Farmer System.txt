@@ -1,98 +1,302 @@
 # ------------------------------------------------------------------------------
-# Farmer System
-# Defines the rules for Farmer skills, including how seeds are planted, 
-# remembering which seeds are planted and who planted them.
+# Farmer System - Reworked
+# Defines the rules for Farmer skills, including finding wild seeds,
+# dynamic skill access based on inventory, and growing phases.
 # ------------------------------------------------------------------------------
-#
+
 #===============================================================================
-# ** Global variable with an array containg all currently growing/grown seed 
-#    objects
+# ** Configuration
+#===============================================================================
+module FarmerConfig
+  FARMER_CLASS_IDS = [4] # CHANGE THIS to your actual Farmer Class ID
+  
+  # Maps Item IDs to their corresponding Plant Skill IDs
+  SEED_ITEMS = {
+    17 => 64,  # Brandywine
+    18 => 66,  # Moon & Stars
+    19 => 68,  # Ponkan
+    20 => 70,  # Bitter melon
+    21 => 72,  # Mung bean
+    22 => 74,  # 7 Pot Douglah
+    23 => 76,  # Cherry Belle
+    24 => 78,  # Fly Agaric
+    25 => 80,  # Crabapple
+    26 => 82,  # Cara Cara
+    27 => 84,  # Destroying Angel
+    28 => 86,  # Prickly Cucumber
+    29 => 88,  # Freestone (unimplemented)
+    30 => 90,  # Fairy Tale
+    31 => 92   # Slimes
+  }
+end
+
+#===============================================================================
+# ** Global variable with an array containg all currently growing/grown seed objects
 #===============================================================================
 $Seeds_growing = []
 
 #===============================================================================
 # ** Seed class
 #===============================================================================
-
 class Seed
-  
-  #-----------------------------------------------------------------------------
-  # * Hash of applicable seed skill ids and their corresponding harvest
-  #   skill ids
-  #-----------------------------------------------------------------------------
-  Seed_skills = {
-  
-    "64" => "65",  # Brandywine
-    "66" => "67",  # Moon & Stars
-    "68" => "69",  # Ponkan
-    "70" => "71",  # Bitter melon
-    "72" => "73",  # Mung bean
-    "74" => "75",  # 7 Pot Douglah
-    "76" => "77",  # Cherry Belle
-    "78" => "79",  # Fly Agaric
-    "80" => "81",  # Crabapple
-    "82" => "83",  # Cara Cara
-    "84" => "85",  # Destroying Angel
-    "86" => "87",  # Prickly Cucumber
-    "88" => "89",  # Freestone (unimplemented)
-    "90" => "91",  # Fairy Tale
-    "92" => "93",  # Slimes
-  
-    }
-  
-  #-----------------------------------------------------------------------------
-  # * Public Instance Variables
-  #-----------------------------------------------------------------------------
   attr_accessor :planter_id
   attr_accessor :plant_id
   attr_accessor :harvest_id
   attr_accessor :growing
   
-  #-----------------------------------------------------------------------------
-  # * Creates a new Seed object
-  #-----------------------------------------------------------------------------
   def initialize(actor_id, skill_id)
     @planter_id = actor_id
     @plant_id = skill_id
     @harvest_id = plant_id + 1
     @growing = 3
+    
     $game_switches[3] = true
-    $game_actors[actor_id].forget_skill(plant_id)
     $Seeds_growing.push(self)
-    # Test that seed objects are properly pushed to the array. (They are.)
-    # $game_message.add("#{$Seeds_growing.last()}")
   end
   
-  #-----------------------------------------------------------------------------
-  # * Grows the seed
-  #-----------------------------------------------------------------------------
   def grow()
-    if growing <= 0 then
-      $game_actors[planter_id].learn_skill(harvest_id)
-      else @growing -= 1
-    end
+    @growing -= 1 if @growing > 0
   end
   
-  #-----------------------------------------------------------------------------
-  # * Harvests the seed
-  #-----------------------------------------------------------------------------
   def harvest()
     $Seeds_growing.delete(self)
-    $game_actors[planter_id].learn_skill(plant_id)
-    $game_actors[planter_id].forget_skill(harvest_id)
-    $game_actors[planter_id].mp += 1
+    $game_actors[@planter_id].mp += 1
   end
-  
+end
+
+#===============================================================================
+# ** Game_Actor - Dynamic Skill Access
+#===============================================================================
+class Game_Actor < Game_Battler
+  alias farmer_sys_added_skills added_skills
+  def added_skills
+    skills = farmer_sys_added_skills.dup
+    
+    # Check if this actor is a Farmer
+    if FarmerConfig::FARMER_CLASS_IDS.include?(self.class_id)
+      
+      FarmerConfig::SEED_ITEMS.each do |item_id, skill_id|
+        # Only grant access if the party owns the seed item
+        if $game_party.has_item?($data_items[item_id])
+          
+          # Check if THIS actor has planted this specific seed
+          growing_seed = $Seeds_growing.find { |s| s.planter_id == self.id && s.plant_id == skill_id }
+          
+          if growing_seed
+            # If the seed is fully grown, grant the harvest skill
+            if growing_seed.growing <= 0
+              skills.push(growing_seed.harvest_id)
+            end
+          else
+            # If the seed is NOT planted, grant the plant skill
+            skills.push(skill_id)
+          end
+          
+        end
+      end
+    end
+    
+    return skills
+  end
+end
+
+#===============================================================================
+# ** Game_Event - Auto-hiding Wild Seeds
+#===============================================================================
+class Game_Event < Game_Character
+  alias farmer_seed_conditions_met? conditions_met?
+  def conditions_met?(page)
+    return false unless farmer_seed_conditions_met?(page)
+    
+    # Check if the Event's Name matches "Wild Seed [ID]" (e.g., "Wild Seed 17")
+    if @event.name =~ /wild seed\s+(\d+)/i
+      item_id = $1.to_i
+      # Hide the event automatically if the party already owns the seed
+      return false if $game_party.has_item?($data_items[item_id])
+    end
+    
+    return true
+  end
+end
+
+#===============================================================================
+# ** Game_Interpreter - Field Event Interaction
+#===============================================================================
+class Game_Interpreter
+  def interact_wild_seed(item_id)
+    item = $data_items[item_id]
+    if item && !$game_party.has_item?(item)
+      $game_party.gain_item(item, 1)
+      
+      # Play a specific Sound Effect (SE) file natively
+      RPG::SE.new("Item3", 80, 100).play 
+      
+      $game_message.add("You found a #{item.name}!")
+      wait_for_message
+    end
+  end
 end
 
 #===============================================================================
 # ** Seed skill functions
 #===============================================================================
-#
-#-------------------------------------------------------------------------------
-# * Moon & Stars dispel
-#-------------------------------------------------------------------------------
 def dispel_moonstars()
-  $game_party.battle_members.each { |battler| battler.clear_states }
+  $game_party.battle_members.each do |battler| 
+    battler.clear_states 
+    battler.add_state(14) # Add HP Regen (State 14) AFTER clearing all states
+  end
   $game_party.clear_results
+end
+
+# ------------------------------------------------------------------------------
+# Farmer System - Battle UI (Seed Tracker)
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** Game_Actor
+#===============================================================================
+class Game_Actor < Game_Battler
+  #--------------------------------------------------------------------------
+  # * Check if the actor should display the Farmer Seeds window
+  #--------------------------------------------------------------------------
+  def has_seeds_display?
+    FarmerConfig::FARMER_CLASS_IDS.include?(self.class_id)
+  end
+end
+
+#===============================================================================
+# ** Window_FarmerSeeds
+# Draws the active growing seeds autonomously above the actor command window.
+# Dynamically resizes based on the number of seeds planted.
+#===============================================================================
+class Window_FarmerSeeds < Window_Base
+  
+  attr_reader :actor
+
+  #-----------------------------------------------------------------------------
+  # * Object Initialization
+  #-----------------------------------------------------------------------------
+  def initialize(cmd_window, viewport)
+    super(0, 0, 160, fitting_height(1))
+    @cmd_window = cmd_window
+    @info_viewport = viewport
+    @actor = nil
+    self.openness = 0
+    self.z = 200
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Set Actor
+  #-----------------------------------------------------------------------------
+  def actor=(actor)
+    return if @actor == actor
+    @actor = actor
+    refresh
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Refresh Contents & Resize
+  #-----------------------------------------------------------------------------
+  def refresh
+    contents.clear
+    
+    unless @actor && @actor.has_seeds_display?
+      self.hide
+      self.openness = 0
+      return
+    end
+    
+    self.show
+    
+    my_seeds = $Seeds_growing.select { |seed| seed.planter_id == @actor.id }
+    
+    lines = my_seeds.empty? ? 1 : my_seeds.size
+    new_height = fitting_height(lines)
+    
+    if self.height != new_height
+      self.height = new_height
+      create_contents 
+    end
+    
+    draw_seed_data(my_seeds)
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Draw Seed Data
+  #-----------------------------------------------------------------------------
+  def draw_seed_data(my_seeds)
+    reset_font_settings 
+    
+    if my_seeds.empty?
+      change_color(system_color)
+      draw_text(0, 0, contents.width, line_height, "No Seeds Planted", 1)
+    else
+      my_seeds.each_with_index do |seed, index|
+        
+        change_color(normal_color) # Always normal color for black/white game
+        
+        skill_name = $data_skills[seed.plant_id].name
+        turns_left = [seed.growing, 0].max
+        y = index * line_height
+        
+        # Draw Skill Name on the left
+        draw_text(0, y, contents.width - 24, line_height, skill_name)
+        
+        # Draw Turns Remaining on the right with a 4px margin
+        draw_text(0, y, contents.width - 4, line_height, turns_left.to_s, 2)
+        
+      end
+    end
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Update Frame
+  #-----------------------------------------------------------------------------
+  def update
+    super
+    self.actor = BattleManager.actor
+    
+    if @cmd_window && @cmd_window.openness > 0 && @actor && @actor.has_seeds_display?
+       
+      base_x = @info_viewport ? @info_viewport.rect.x : 0
+      base_y = @info_viewport ? @info_viewport.rect.y : 0
+      scroll_x = @info_viewport ? @info_viewport.ox : 0
+      scroll_y = @info_viewport ? @info_viewport.oy : 0
+      
+      # Align the RIGHT edge of this window with the RIGHT edge of the command window
+      self.x = base_x + @cmd_window.x + @cmd_window.width - self.width - scroll_x
+      self.y = base_y + @cmd_window.y - scroll_y - self.height
+      
+      self.openness = @cmd_window.openness
+      self.visible  = @cmd_window.visible
+    else
+      self.visible = false
+      self.openness = 0
+    end
+  end
+end
+
+#===============================================================================
+# ** Scene_Battle (Farmer Window Integration)
+#===============================================================================
+class Scene_Battle < Scene_Base
+  
+  #-----------------------------------------------------------------------------
+  # * Alias: Create Actor Command Window
+  #-----------------------------------------------------------------------------
+  alias farmer_create_actor_command_window create_actor_command_window
+  def create_actor_command_window
+    farmer_create_actor_command_window
+    @farmer_seeds_window = Window_FarmerSeeds.new(@actor_command_window, @info_viewport)
+  end
+  
+  #-----------------------------------------------------------------------------
+  # * Alias: Turn End
+  #-----------------------------------------------------------------------------
+  alias farmer_turn_end turn_end
+  def turn_end
+    farmer_turn_end
+    @farmer_seeds_window.refresh if @farmer_seeds_window
+  end
+  
 end
