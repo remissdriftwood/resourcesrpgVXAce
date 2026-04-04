@@ -4,12 +4,17 @@
 # Bypasses weapon requirements for skills when specific states are active.
 # Removes those states from the user after casting designated finisher skills.
 # Seals specific skills until the end of battle when finishers are used.
+# Prevents consecutive setup casts and restricts finishers without setups.
 #==============================================================================
 
 module ChestConfig
   #--------------------------------------------------------------------------
   # * Configuration
   #--------------------------------------------------------------------------
+  
+  # Skill IDs for the setup skills
+  AMMO_CRATE_SKILL      = 15
+  WEAPON_CHEST_SKILL    = 16
   
   # Skill IDs for the finishers
   ARSENAL_BARRAGE_SKILL = 17
@@ -101,6 +106,70 @@ class Game_Actor < Game_Battler
 end
 
 #==============================================================================
+# ** Scene_Battle
+#==============================================================================
+
+class Scene_Battle < Scene_Base
+
+  # Safety Check: Ensure we don't alias twice
+  unless method_defined?(:sh_chest_scene_use_item)
+    alias :sh_chest_scene_use_item :use_item
+  end
+
+  #--------------------------------------------------------------------------
+  # * Override: Intercept item/skill usage before execution
+  #--------------------------------------------------------------------------
+  def use_item
+    item = @subject.current_action.item
+
+    if item.is_a?(RPG::Skill)
+
+      # --- Setup Skills Interception ---
+      if item.id == ChestConfig::AMMO_CRATE_SKILL
+        if @subject.friends_unit.members.any? { |actor| actor.state?(ChestConfig::AMMO_CRATE_STATE) }
+          @log_window.display_use_item(@subject, item)
+          @log_window.add_text("...but there was already an Ammo crate!")
+          @log_window.wait
+          return # Ends execution before MP is paid or effects are applied
+        end
+      end
+
+      if item.id == ChestConfig::WEAPON_CHEST_SKILL
+        if @subject.friends_unit.members.any? { |actor| actor.state?(ChestConfig::WEAPON_CHEST_STATE) }
+          @log_window.display_use_item(@subject, item)
+          @log_window.add_text("...but there was already a Weapon chest!")
+          @log_window.wait
+          return 
+        end
+      end
+
+      # --- Finisher Skills Interception ---
+      if item.id == ChestConfig::BULLET_STORM_SKILL
+        unless @subject.friends_unit.members.any? { |actor| actor.state?(ChestConfig::AMMO_CRATE_STATE) }
+          @log_window.display_use_item(@subject, item)
+          @log_window.add_text("...but there was no Ammo crate!")
+          @log_window.wait
+          return 
+        end
+      end
+
+      if item.id == ChestConfig::ARSENAL_BARRAGE_SKILL
+        unless @subject.friends_unit.members.any? { |actor| actor.state?(ChestConfig::WEAPON_CHEST_STATE) }
+          @log_window.display_use_item(@subject, item)
+          @log_window.add_text("...but there was no Weapon chest!")
+          @log_window.wait
+          return 
+        end
+      end
+
+    end
+
+    # Call original execution if it passes the checks above
+    sh_chest_scene_use_item
+  end
+end
+
+#==============================================================================
 # ** Game_Battler
 #==============================================================================
 
@@ -123,7 +192,14 @@ class Game_Battler < Game_BattlerBase
       
       # If user casts Arsenal Barrage
       if item.id == ChestConfig::ARSENAL_BARRAGE_SKILL
-        remove_state(ChestConfig::WEAPON_CHEST_STATE) if respond_to?(:remove_state)
+        
+        # Wipe the state from ALL party members
+        if $game_party.in_battle
+          self.friends_unit.members.each { |battler| battler.remove_state(ChestConfig::WEAPON_CHEST_STATE) }
+        else
+          remove_state(ChestConfig::WEAPON_CHEST_STATE) if respond_to?(:remove_state)
+        end
+        
         # Seal the respective skills for this specific actor
         if self.is_a?(Game_Actor)
           self.dynamically_sealed_skills.concat(ChestConfig::ARSENAL_SEALED_SKILLS)
@@ -133,7 +209,14 @@ class Game_Battler < Game_BattlerBase
       
       # If user casts Bullet Storm
       if item.id == ChestConfig::BULLET_STORM_SKILL
-        remove_state(ChestConfig::AMMO_CRATE_STATE) if respond_to?(:remove_state)
+        
+        # Wipe the state from ALL party members
+        if $game_party.in_battle
+          self.friends_unit.members.each { |battler| battler.remove_state(ChestConfig::AMMO_CRATE_STATE) }
+        else
+          remove_state(ChestConfig::AMMO_CRATE_STATE) if respond_to?(:remove_state)
+        end
+        
         # Seal the respective skills for this specific actor
         if self.is_a?(Game_Actor)
           self.dynamically_sealed_skills.concat(ChestConfig::BULLET_SEALED_SKILLS)

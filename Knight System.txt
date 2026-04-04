@@ -12,7 +12,7 @@ module KnightConfig
   FEEDBACK_SKILL = 23 
   
   # Shield Skills
-  SHIELD_SKILLS = [28, 29]
+  SHIELD_SKILLS = [28, 29, 31]
   
   # For a hamburger today
   HAMBURGER_SKILL = 30

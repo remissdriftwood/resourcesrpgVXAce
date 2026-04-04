@@ -1,18 +1,23 @@
 class Window_BattleStatus < Window_Selectable
-  # Overrides the MP drawing specifically for the battle status window
+  # Overrides the HP drawing for the battle status window
+  def draw_actor_hp(actor, x, y, width = 124)
+    draw_gauge(x, y, width, actor.hp_rate, hp_gauge_color1, hp_gauge_color2)
+    
+    change_color(normal_color)
+    hp_string = "#{actor.hp}/#{actor.mhp}"
+    
+    # Draw the numbers across the full width without the "HP" label
+    draw_text(x, y, width, line_height, hp_string, 2)
+  end
+
+  # Overrides the MP drawing for the battle status window
   def draw_actor_mp(actor, x, y, width = 124)
     draw_gauge(x, y, width, actor.mp_rate, mp_gauge_color1, mp_gauge_color2)
     
-    # Draw "MP" title
-    change_color(system_color)
-    draw_text(x, y, 30, line_height, Vocab::mp_a)
-    
-    # Format the current/max string
     change_color(normal_color)
     mp_string = "#{actor.mp}/#{actor.mmp}"
     
-    # Calculate available space and draw the numbers, letting the engine squish if needed
-    val_width = width - 30
-    draw_text(x + 30, y, val_width, line_height, mp_string, 2)
+    # Draw the numbers across the full width without the "MP" label
+    draw_text(x, y, width, line_height, mp_string, 2)
   end
 end

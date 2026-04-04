@@ -388,20 +388,20 @@ def item_processor()
       @party_size = $game_party.members().length
       i = 1
       until i > @party_size do
-        item_effect_invispot()
+        item_effect_invispot(:diluent)
         i += 1
         @target_id = i
       end
       elsif $game_actors[@user_id].state?(47) == true
-        item_effect_invispot()
+        item_effect_invispot(:herbal)
       elsif $game_actors[@user_id].state?(50) == true
-        item_effect_invispot()
+        item_effect_invispot(:normal)
         echinacea_effect("ally")
       elsif $game_actors[@user_id].state?(51) == true
-        item_effect_invispot()
+        item_effect_invispot(:normal)
         mercury_effect("ally")
       else 
-        item_effect_invispot()
+        item_effect_invispot(:normal)
       end
       
   #-----------------------------------------------------------------------------
@@ -415,7 +415,7 @@ def item_processor()
       i = 1
       @target_id = i
       until i > @party_size do
-        item_effect_cookoil("ally")
+        item_effect_cookoil("ally", :diluent)
         i += 1
         @target_id = i
       end
@@ -423,7 +423,7 @@ def item_processor()
       i = 0
       until i > @party_size do
         if $game_troop.members[i] != nil then
-          item_effect_cookoil("enemy")
+          item_effect_cookoil("enemy", :diluent)
           i += 1
           @target_index = i
         else 
@@ -432,26 +432,24 @@ def item_processor()
         end
       end
       elsif $game_actors[@user_id].state?(47) == true
-        item_effect_cookoil("ally")
-        item_effect_cookoil("enemy")
+        item_effect_cookoil("ally", :herbal)
+        item_effect_cookoil("enemy", :herbal)
       elsif $game_actors[@user_id].state?(50) == true
-        item_effect_cookoil("ally")
-        item_effect_cookoil("enemy")
+        item_effect_cookoil("ally", :normal)
+        item_effect_cookoil("enemy", :normal)
         echinacea_effect("ally")
         echinacea_effect("enemy")
       elsif $game_actors[@user_id].state?(51) == true
-        item_effect_cookoil("ally")
-        item_effect_cookoil("enemy")
+        item_effect_cookoil("ally", :normal)
+        item_effect_cookoil("enemy", :normal)
         mercury_effect("ally")
         mercury_effect("enemy")
       else 
-        item_effect_cookoil("ally")
-        item_effect_cookoil("enemy")
+        item_effect_cookoil("ally", :normal)
+        item_effect_cookoil("enemy", :normal)
       end
-  else end
-  falseAlchemy_effect()    
-end
-
+    end
+  end
 #===============================================================================
 # ** Item effects
 #===============================================================================
@@ -625,23 +623,41 @@ end
 #-------------------------------------------------------------------------------
 # * Invisibility potion
 #-------------------------------------------------------------------------------
-def item_effect_invispot()
-  $game_actors[@target_id].add_state(52)
+def item_effect_invispot(mod = :normal)
+  case mod
+  when :herbal
+    state_id = 101 # REPLACE WITH YOUR INVISIBILITY (HERBAL) STATE ID
+  when :diluent
+    state_id = 102 # REPLACE WITH YOUR INVISIBILITY (DILUENT) STATE ID
+  else
+    state_id = 52  # Normal Invisibility
+  end
+  
+  $game_actors[@target_id].add_state(state_id)
 end
 
 #-------------------------------------------------------------------------------
 # * Cooking oil
 #-------------------------------------------------------------------------------
-def item_effect_cookoil(scope)
+def item_effect_cookoil(scope, mod = :normal)
+  case mod
+  when :herbal
+    state_id = 103 # REPLACE WITH YOUR COOKING OIL (HERBAL) STATE ID
+  when :diluent
+    state_id = 104 # REPLACE WITH YOUR COOKING OIL (DILUENT) STATE ID
+  else
+    state_id = 53  # Normal Cooking Oil
+  end
+
   case scope
   when "ally"
-    $game_actors[@target_id].add_state(53)
+    $game_actors[@target_id].add_state(state_id)
     SceneManager.scene.log_window.add_text(
       $game_actors[@target_id].name + " slips in oil!"
       )
     SceneManager.scene.log_window.wait
   when "enemy"
-    $game_troop.members[@target_index].add_state(53)
+    $game_troop.members[@target_index].add_state(state_id)
     SceneManager.scene.log_window.add_text(
        $game_troop.members[@target_index].name + " slips in oil!"
       )

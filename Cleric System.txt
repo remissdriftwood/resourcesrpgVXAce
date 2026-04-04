@@ -1,109 +1,178 @@
-# ------------------------------------------------------------------------------
-# Cleric System
-# Defines the rules for Farmer skills, including managing circles.
-# ------------------------------------------------------------------------------
-#
-#===============================================================================
-# ** Global variable with an array containg all currently active circles
-#===============================================================================
+#==============================================================================
+# Cleric System Complete v3 (Circles & MP Restore)
+#==============================================================================
+
 $Circles_active = []
 
-#===============================================================================
-# ** Circle class
-#===============================================================================
-
+#==============================================================================
+# 1. Circle Class Architecture
+#==============================================================================
 class Circle
+  attr_accessor :caster      
+  attr_accessor :skill_id    
   
-  #-----------------------------------------------------------------------------
-  # * Hash of applicable circle skill ids and their corresponding effect
-  #   common event ids
-  #-----------------------------------------------------------------------------
-  Circle_skills = {
-
-    49 => 37,   # Circle of tranquility
-    52 => 40,   # Circle of hostility
-    58 => 46,   # Circle of immortality
-    104 => 41,  # Circle of attunement
-    112 => 47,  # Circle of darkness
-    115 => 57,  # Circle of immobility
-
-  }
-  
-  #-----------------------------------------------------------------------------
-  # * Public Instance Variables
-  #-----------------------------------------------------------------------------
-  attr_accessor :caster_id
-  attr_accessor :circle_id
-  attr_accessor :active
-  attr_accessor :effect_event_id
-  
-  #-----------------------------------------------------------------------------
-  # * Creates a new Circle object
-  #-----------------------------------------------------------------------------
-  def initialize(actor_id, skill_id)
-    @caster_id = actor_id
-    @circle_id = skill_id
-    @effect_id = circle_id + 1
-    @effect_event_id = Circle_skills.fetch(skill_id)
-    @active = true
-    $game_switches[25] = true
+  def initialize(caster, skill_id)
+    # Safely handle both actor IDs and actual Game_Actor objects
+    if caster.is_a?(Integer)
+      @caster = $game_actors[caster]
+    else
+      @caster = caster
+    end
+    @skill_id = skill_id
+    
+    $Circles_active ||= []
+    # Prevent duplicate circles of the same type from the same caster
+    $Circles_active.reject! { |c| c.caster == @caster && c.skill_id == @skill_id }
     $Circles_active.push(self)
-    #$game_message.add("#{$Circles_active}")
   end
   
-  #-----------------------------------------------------------------------------
-  # * Circle effect processor
-  #-----------------------------------------------------------------------------
-  def run_effect_event()
-    $game_temp.reserve_common_event(effect_event_id)
+  def active?
+    @caster && @caster.is_a?(Game_Battler) && $game_party.battle_members.include?(@caster) && !@caster.dead?
   end
-  
-  #-----------------------------------------------------------------------------
-  # * Check for circle caster death and clear circle if dead
-  #-----------------------------------------------------------------------------
-  def caster_death_check()
-    if $game_actors[caster_id].dead? == true then
-      $Circles_active.delete(self)
-      self.active = false
-      else end
-  end
-  
 end
 
-#===============================================================================
-# ** Circle of hostility effect
 #==============================================================================
-
-def circle_hostility()
-  # Add ATK buff to party members
-  $game_party.battle_members.each { |battler| battler.add_state(38) }
-  $game_party.clear_results
-
-  # Add ATK buff to enemies
-  $game_troop.members.each { |battler| battler.add_state(38) }
-  $game_troop.clear_results
-
-end
-
-#===============================================================================
-# ** Circle of attunement effect
+# 2. MP Restore & Auto-Casting Circles
 #==============================================================================
-
-def circle_attunement()
-  # Add MAT buff to party members
-  $game_party.battle_members.each { |battler| battler.add_state(38) }
-  $game_party.clear_results
-
-  # Add MAT buff to enemies
-  $game_troop.members.each { |battler| battler.add_state(38) }
-  $game_troop.clear_results
-
+class Game_Actor < Game_Battler
+  attr_accessor :healed_someone_this_action
 end
 
-#===============================================================================
-# ** Cleric MP restore
-#===============================================================================
-
-def MP_restore_cleric(actor_id, amount)
-  $game_actors[actor_id].mp += amount
+class Scene_Battle < Scene_Base
+  
+  # Hook into invoke_item to check HP differences for MP restoring
+  alias cleric_mp_invoke_item invoke_item
+  def invoke_item(target, item)
+    old_hp = target.hp 
+    cleric_mp_invoke_item(target, item)
+    
+    if @subject.actor? && item.is_a?(RPG::Skill) && item.note =~ /<cleric_heal>/i
+      if target.hp > old_hp
+        @subject.healed_someone_this_action = true
+      end
+    end
+  end
+  
+  # Hook into use_item to restore MP and automatically cast circles
+  alias cleric_mp_use_item use_item
+  def use_item
+    if @subject.actor?
+      @subject.healed_someone_this_action = false
+    end
+    
+    cleric_mp_use_item 
+    
+    item = @subject.current_action.item
+    
+    # --- MP Restore Logic ---
+    if @subject.actor? && @subject.healed_someone_this_action
+      mp_restore_amount = $game_variables[13] > 0 ? $game_variables[13] : 1
+      @subject.mp += mp_restore_amount
+    end
+    
+    # --- Auto-Cast Circle Logic ---
+    if @subject.actor? && item.is_a?(RPG::Skill)
+      circle_skill_ids = [49, 52, 58, 104, 112, 115]
+      if circle_skill_ids.include?(item.id)
+        Circle.new(@subject, item.id)
+      end
+    end
+  end
+  
+  #==============================================================================
+  # 3. End of Turn Execution & Visuals
+  #==============================================================================
+  alias cleric_circle_scene_turn_end turn_end
+  def turn_end
+    process_active_circles
+    cleric_circle_scene_turn_end
+  end
+  
+  def process_active_circles
+    $Circles_active ||= []
+    $Circles_active.reject! { |circle| !circle.active? }
+    
+    $Circles_active.each do |circle|
+      case circle.skill_id
+      when 49 # Circle of Tranquility
+        RPG::SE.new("Heal4", 80, 100).play
+        @log_window.add_text("#{circle.caster.name}'s Circle of Tranquility restores HP!")
+        @log_window.wait
+        healed_anyone = false
+        heal_amount = 50 # Replace with a variable if needed
+        
+        # Heal Allies
+        $game_party.battle_members.each do |b|
+          next if b.dead?
+          if b.hp < b.mhp
+            recovered = [heal_amount, b.mhp - b.hp].min
+            b.hp += recovered
+            @log_window.add_text("#{b.name} recovered #{recovered} HP!")
+            @log_window.wait
+            healed_anyone = true
+          end
+        end
+        
+        # Heal Enemies
+        $game_troop.members.each do |b|
+          next if b.dead?
+          if b.hp < b.mhp
+            recovered = [heal_amount, b.mhp - b.hp].min
+            b.hp += recovered
+            @log_window.add_text("#{b.name} recovered #{recovered} HP!")
+            @log_window.wait
+            healed_anyone = true
+          end
+        end
+        
+        if healed_anyone
+          mp_amount = $game_variables[16] > 0 ? $game_variables[16] : 1 
+          circle.caster.mp += mp_amount
+        end
+        
+        refresh_status
+        @log_window.wait_and_clear
+        
+      when 52 # Circle of Hostility
+        RPG::SE.new("Darkness1", 80, 100).play
+        @log_window.add_text("#{circle.caster.name}'s Circle of Hostility activates!")
+        @log_window.wait
+        $game_party.battle_members.each { |b| b.add_state(38) unless b.dead? }
+        $game_troop.members.each { |b| b.add_state(38) unless b.dead? }
+        @log_window.wait_and_clear
+        
+      when 58 # Circle of Immortality
+        RPG::SE.new("Recovery", 80, 100).play
+        @log_window.add_text("#{circle.caster.name}'s Circle of Immortality revives the fallen!")
+        @log_window.wait
+        $game_party.battle_members.each do |b|
+          if b.death_state?
+            b.revive
+            b.hp = [50, 1].max # Give them some HP upon reviving
+            @log_window.add_text("#{b.name} was revived!")
+            @log_window.wait
+          end
+        end
+        refresh_status
+        @log_window.wait_and_clear
+        
+      when 104 # Circle of Attunement
+        RPG::SE.new("Up4", 80, 100).play
+        @log_window.add_text("#{circle.caster.name}'s Circle of Attunement heightens senses!")
+        @log_window.wait
+        $game_party.battle_members.each { |b| b.add_state(38) unless b.dead? }
+        $game_troop.members.each { |b| b.add_state(38) unless b.dead? }
+        @log_window.wait_and_clear
+        
+      when 112 # Circle of Darkness
+        # RPG::SE.new("Darkness3", 80, 100).play
+        # Fill in Darkness effects
+        
+      when 115 # Circle of Immobility
+        # RPG::SE.new("Paralyze3", 80, 100).play
+        # Fill in Immobility effects
+        
+      end
+    end
+  end
 end

@@ -58,10 +58,15 @@ end
 class Scene_Battle < Scene_Base
   alias random_extra_use_item use_item
   def use_item
+    # 1. Grab the user and item BEFORE the action resolves
+    user = @subject
+    item = user && user.current_action ? user.current_action.item : nil
+    
+    # 2. Call the original alias
     random_extra_use_item
     
-    user = @subject
-    item = user.current_action.item
+    # 3. Safely abort if the action was wiped
+    return unless user && item
     
     # Check if the used item has the random extra hit notetag
     if item.is_a?(RPG::UsableItem) && item.random_extra_hit_multi > 0 && user.is_a?(Game_Actor)
