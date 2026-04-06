@@ -7,7 +7,7 @@
 # ** Refreshes inventory after each battle
 #===============================================================================
 def item_refresher()
-
+  
   #-----------------------------------------------------------------------------
   # * Hash of switch IDs and corresponding item IDs.
   #   (Commented out because of convenient ID math.)
@@ -36,6 +36,13 @@ end
 # ** Identifies which item to use and what state effects to apply
 #===============================================================================
 def item_processor()
+  
+  # Debug box
+  msgbox("Action Name: " + battle_info_used.name + 
+         "\nAction ID: " + battle_info_used.id.to_s + 
+         "\nIs it an Item?: " + battle_info_used.is_a?(RPG::Item).to_s +
+         "\nTarget ID: " + battle_info_targets[1].id.to_s)
+         
   #-----------------------------------------------------------------------------
   # * Initialize variables
   #-----------------------------------------------------------------------------
@@ -48,6 +55,9 @@ def item_processor()
   @party_size = 1
   @valid_target = 0
 
+  # Trigger False Alchemy check
+  falseAlchemy_effect()
+  
   case battle_info_used.id
 
   #-----------------------------------------------------------------------------
@@ -449,6 +459,15 @@ def item_processor()
         item_effect_cookoil("enemy", :normal)
       end
     end
+    
+    # Clean up Chemist modifier states after the item effect resolves.
+    # NOTE: False alchemy is cleaned up in its own method.
+    chemist_states = [47, 48, 49, 50, 51]
+    chemist_states.each do |state_id|
+      if $game_actors[@user_id].state?(state_id)
+        $game_actors[@user_id].remove_state(state_id)
+      end
+    end
   end
 #===============================================================================
 # ** Item effects
@@ -673,9 +692,18 @@ end
 # * False alchemy
 #-------------------------------------------------------------------------------
 def falseAlchemy_effect()
-  if $game_actors[@user_id].state?(54) then
-    $game_party.gain_item($data_items[battle_info_used.id], 1)
-  else end
+  user = battle_info_user
+  used_action = battle_info_used
+  
+  if user.is_a?(Game_Actor) && user.state?(54) && used_action.is_a?(RPG::Item)
+    $game_party.gain_item(used_action, 1)
+    
+    # Remove the False Alchemy state so it only works once
+    user.remove_state(54) 
+    
+    SceneManager.scene.log_window.add_text(user.name + " synthesized a copy of the item!")
+    SceneManager.scene.log_window.wait
+  end
 end
 
 #-------------------------------------------------------------------------------
