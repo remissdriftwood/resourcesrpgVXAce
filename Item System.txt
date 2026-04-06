@@ -1,776 +1,354 @@
-# ------------------------------------------------------------------------------
-# Item System
-# Defines the effects of items and of Chemist skills.
-# ------------------------------------------------------------------------------
-#
-#===============================================================================
-# ** Refreshes inventory after each battle
-#===============================================================================
-def item_refresher()
+# ==============================================================================
+# Item System - Core
+# ==============================================================================
+
+module ChemistConfig
+  CHEMIST_CLASS_ID = 5
   
-  #-----------------------------------------------------------------------------
-  # * Hash of switch IDs and corresponding item IDs.
-  #   (Commented out because of convenient ID math.)
-  #-----------------------------------------------------------------------------
-#  Seed_skills = {
-#  
-#  "41" => "1",  # Balm
-#  "42" => "2",  # Moon & Stars
-#  
-#  }
-  
-  i = 41
-  while i <= 56 do
-    if $game_switches[i] == true then
-      $game_party.lose_item($data_items[i - 40], 99)
-      $game_party.gain_item($data_items[i - 40], 1)
-      i += 1
-    else 
-      $game_party.lose_item($data_items[i - 40], 99)
-      i += 1
-    end
+  # Helper method to check if an item is a "Regular Item" (Consumable)
+  # itype_id == 1 is the default for Regular Items in the Database.
+  def self.is_consumable?(item)
+    item.is_a?(RPG::Item) && item.itype_id == 1
   end
 end
-  
+
 #===============================================================================
-# ** Identifies which item to use and what state effects to apply
+# ** Game_Party
 #===============================================================================
-def item_processor()
-  
-  # Debug box
-  msgbox("Action Name: " + battle_info_used.name + 
-         "\nAction ID: " + battle_info_used.id.to_s + 
-         "\nIs it an Item?: " + battle_info_used.is_a?(RPG::Item).to_s +
-         "\nTarget ID: " + battle_info_targets[1].id.to_s)
-         
-  #-----------------------------------------------------------------------------
-  # * Initialize variables
-  #-----------------------------------------------------------------------------
-  @user_id = battle_info_user.id
-  @target_id = 1
-  @target_index = 1
-  @hp_restored = 0
-  @mp_restored = 0
-  @dmg_dealt = 0
-  @party_size = 1
-  @valid_target = 0
+class Game_Party < Game_Unit
+  attr_accessor :items_used_in_battle
 
-  # Trigger False Alchemy check
-  falseAlchemy_effect()
-  
-  case battle_info_used.id
+  alias chemist_party_init initialize
+  def initialize
+    chemist_party_init
+    @items_used_in_battle = []
+  end
 
-  #-----------------------------------------------------------------------------
-  # * Use Balm
-  #-----------------------------------------------------------------------------
-  when 1
-    @target_id = battle_info_targets[1].id;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = $game_party.members().length
-      i = 1
-      until i > @party_size do
-        item_effect_balmSalve(25)
-        i += 1
-        @target_id = i
-      end
-      elsif $game_actors[@user_id].state?(47) == true
-        item_effect_balmSalve(100)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_balmSalve(50)
-        echinacea_effect("ally")
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_balmSalve(50)
-        mercury_effect("ally")
-      else 
-        item_effect_balmSalve(50)
-      end
-      
-  #-----------------------------------------------------------------------------
-  # * Use Salve
-  #-----------------------------------------------------------------------------
-  when 2
-    @target_id = battle_info_targets[1].id;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = $game_party.members().length
-      i = 1
-      until i > @party_size do
-        item_effect_balmSalve(50)
-        i += 1
-        @target_id = i
-      end
-      elsif $game_actors[@user_id].state?(47) == true
-        item_effect_balmSalve(200)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_balmSalve(100)
-        echinacea_effect("ally")
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_balmSalve(100)
-        mercury_effect("ally")
-      else 
-        item_effect_balmSalve(100)
-      end
-      
-  #-----------------------------------------------------------------------------
-  # * Use Elixir
-  #-----------------------------------------------------------------------------
-  when 3
-    @target_id = battle_info_targets[1].id;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = $game_party.members().length
-      i = 1
-      until i > @party_size do
-        item_effect_elixir(50)
-        i += 1
-        @target_id = i
-      end
-      elsif $game_actors[@user_id].state?(47) == true
-        item_effect_elixir(200)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_elixir(100)
-        echinacea_effect("ally")
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_elixir(100)
-        mercury_effect("ally")
-      else 
-        item_effect_elixir(100)
-      end
-      
-  #-----------------------------------------------------------------------------
-  # * Use Fulminating mercury
-  #-----------------------------------------------------------------------------
-  when 4
-    @target_index = battle_info_targets[1].index;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = 8
-      i = 0
-      until i > @party_size do
-        if $game_troop.members[i] != nil then
-          item_effect_fulmerc(50)
-          i += 1
-          @target_index = i
-        else 
-          i += 1
-          @target_index = i
-        end
-      end
-      elsif $game_actors[@user_id].state?(49) == true
-        item_effect_fulmerc(200)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_fulmerc(100)
-        if $game_troop.members[@target_index].hp > 0 then
-          echinacea_effect("enemy")
-        else end
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_fulmerc(100)
-        if $game_troop.members[@target_index].hp > 0 then
-          mercury_effect("enemy")
-        else end
-      else 
-        item_effect_fulmerc(1)
-      end
-    
-  #-----------------------------------------------------------------------------
-  # * Use Sharpening oil
-  #-----------------------------------------------------------------------------
-  when 5
-    @target_id = battle_info_targets[1].id;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = $game_party.members().length
-      i = 1
-      until i > @party_size do
-        item_effect_sharpoil(3)
-        i += 1
-        @target_id = i
-      end
-      elsif $game_actors[@user_id].state?(47) == true
-        item_effect_sharpoil(10)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_sharpoil(5)
-        echinacea_effect("ally")
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_sharpoil(5)
-        mercury_effect("ally")
-      else 
-        item_effect_sharpoil(5)
-      end
-      
-  #-----------------------------------------------------------------------------
-  # * Use Chitin shard
-  #-----------------------------------------------------------------------------
-  when 6
-    @target_id = battle_info_targets[1].id;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = $game_party.members().length
-      i = 1
-      until i > @party_size do
-        item_effect_chitshard(3)
-        i += 1
-        @target_id = i
-      end
-      elsif $game_actors[@user_id].state?(47) == true
-        item_effect_chitshard(10)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_chitshard(5)
-        echinacea_effect("ally")
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_chitshard(5)
-        mercury_effect("ally")
-      else 
-        item_effect_chitshard(5)
-      end
-      
-  #-----------------------------------------------------------------------------
-  # * Use Cup of coffee
-  #-----------------------------------------------------------------------------
-  when 7
-    @target_id = battle_info_targets[1].id;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = $game_party.members().length
-      i = 1
-      until i > @party_size do
-        item_effect_cupocoff(3)
-        i += 1
-        @target_id = i
-      end
-      elsif $game_actors[@user_id].state?(47) == true
-        item_effect_cupocoff(10)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_cupocoff(5)
-        echinacea_effect("ally")
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_cupocoff(5)
-        mercury_effect("ally")
-      else 
-        item_effect_cupocoff(5)
-      end
-      
-  #-----------------------------------------------------------------------------
-  # * Use Ethereal gauze
-  #-----------------------------------------------------------------------------
-  when 8
-    @target_id = battle_info_targets[1].id;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = $game_party.members().length
-      i = 1
-      until i > @party_size do
-        item_effect_ethgauze(3)
-        i += 1
-        @target_id = i
-      end
-      elsif $game_actors[@user_id].state?(47) == true
-        item_effect_ethgauze(10)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_ethgauze(5)
-        echinacea_effect("ally")
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_ethgauze(5)
-        mercury_effect("ally")
-      else 
-        item_effect_ethgauze(5)
-      end
-      
-  #-----------------------------------------------------------------------------
-  # * Use Red candle
-  #-----------------------------------------------------------------------------
-  when 9
-    @party_size = $game_party.members().length
-    i = 1
-    until i > @party_size do
-      if $game_actors[i].state?(1) == true then
-        @valid_target = 1
-        i += 1
-      else i += 1
-      end
+  # Force maximum capacity of 1 for all Regular Items
+  alias chemist_max_item_number max_item_number
+  def max_item_number(item)
+    if ChemistConfig.is_consumable?(item)
+      return 1
+    else
+      return chemist_max_item_number(item)
     end
-    if @valid_target == 1 then
-      @target_id = battle_info_targets[1].id;
-      if $game_actors[@user_id].state?(48) == true then
-        i = 1
-        until i > @party_size do
-          item_effect_redcandle(5)
-          i += 1
-          @target_id = i
-        end
-        elsif $game_actors[@user_id].state?(47) == true
-          item_effect_redcandle(20)
-        elsif $game_actors[@user_id].state?(50) == true
-          item_effect_redcandle(10)
-          echinacea_effect("ally")
-        elsif $game_actors[@user_id].state?(51) == true
-          item_effect_redcandle(10)
-          mercury_effect("ally")
-        else 
-          item_effect_redcandle(10)
-        end
-      else end
+  end
 
-  #-----------------------------------------------------------------------------
-  # * Use Chungus chug
-  #-----------------------------------------------------------------------------
-  when 10
-    @target_id = battle_info_targets[1].id;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = $game_party.members().length
-      i = 1
-      until i > @party_size do
-        item_effect_chungus(3)
-        i += 1
-        @target_id = i
-      end
-      elsif $game_actors[@user_id].state?(47) == true
-        item_effect_chungus(10)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_chungus(5)
-        echinacea_effect("ally")
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_chungus(5)
-        mercury_effect("ally")
-      else 
-        item_effect_chungus(5)
-      end
-      
-  #-----------------------------------------------------------------------------
-  # * Use Hunk o' meat
-  #-----------------------------------------------------------------------------
-  when 11
-    @target_id = battle_info_targets[1].id;
-    @party_size = $game_party.members().length
-    i = 1
-    until i > @party_size do
-      if $game_actors[@target_id].state?(1) == false then
-        if $game_actors[@user_id].state?(47) == true then
-          item_effect_hunko(50)
-        elsif $game_actors[@user_id].state?(50) == true
-          item_effect_hunko(25)
-          echinacea_effect("ally")
-        elsif $game_actors[@user_id].state?(51) == true
-          item_effect_hunko(25)
-          mercury_effect("ally")
-        else item_effect_hunko(25)
-        end
-        i += 1
-        @target_id = i
-      else
-        i += 1
-        @target_id = i
-      end
+  # Clear the tracking array at the start of battle
+  alias chemist_on_battle_start on_battle_start
+  def on_battle_start
+    chemist_on_battle_start
+    @items_used_in_battle = []
+  end
+
+  # Restore all consumed regular items at the end of battle
+  alias chemist_on_battle_end on_battle_end
+  def on_battle_end
+    chemist_on_battle_end
+    @items_used_in_battle.each do |item|
+      gain_item(item, 1)
     end
-  
-  #-----------------------------------------------------------------------------
-  # * Use Martyr's Joy
-  #-----------------------------------------------------------------------------
-  when 13
-    $game_switches[35] = 1
-    $game_variables[25] = 1
-    $game_variables[26] = battle_info_targets[1].id
-  
-  #-----------------------------------------------------------------------------
-  # * Use Ether
-  #-----------------------------------------------------------------------------
-  when 14
-    @target_id = battle_info_targets[1].id;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = $game_party.members().length
-      i = 1
-      until i > @party_size do
-        item_effect_ether(100)
-        i += 1
-        @target_id = i
-      end
-      elsif $game_actors[@user_id].state?(47) == true
-        item_effect_ether(200)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_ether(100)
-        echinacea_effect("ally")
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_ether(100)
-        mercury_effect("ally")
-      else 
-        item_effect_ether(100)
-      end
-  
-  #-----------------------------------------------------------------------------
-  # * Use Invisibility potion
-  #-----------------------------------------------------------------------------
-  when 15
-    @target_id = battle_info_targets[1].id;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = $game_party.members().length
-      i = 1
-      until i > @party_size do
-        item_effect_invispot(:diluent)
-        i += 1
-        @target_id = i
-      end
-      elsif $game_actors[@user_id].state?(47) == true
-        item_effect_invispot(:herbal)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_invispot(:normal)
-        echinacea_effect("ally")
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_invispot(:normal)
-        mercury_effect("ally")
-      else 
-        item_effect_invispot(:normal)
+    @items_used_in_battle.clear
+  end
+end
+
+#===============================================================================
+# ** Game_Battler
+#===============================================================================
+class Game_Battler < Game_BattlerBase
+  alias chemist_consume_item consume_item
+  def consume_item(item)
+    if ChemistConfig.is_consumable?(item)
+      # Add to tracking array if we are in battle
+      if $game_party.in_battle
+        $game_party.items_used_in_battle.push(item)
       end
       
-  #-----------------------------------------------------------------------------
-  # * Use Cooking oil
-  #-----------------------------------------------------------------------------
-  when 16
-    @target_id = battle_info_user.id
-    @target_index = battle_info_targets[1].index;
-    if $game_actors[@user_id].state?(48) == true then
-      @party_size = $game_party.members().length
-      i = 1
-      @target_id = i
-      until i > @party_size do
-        item_effect_cookoil("ally", :diluent)
-        i += 1
-        @target_id = i
-      end
-      @party_size = 8
-      i = 0
-      until i > @party_size do
-        if $game_troop.members[i] != nil then
-          item_effect_cookoil("enemy", :diluent)
-          i += 1
-          @target_index = i
-        else 
-          i += 1
-          @target_index = i
-        end
-      end
-      elsif $game_actors[@user_id].state?(47) == true
-        item_effect_cookoil("ally", :herbal)
-        item_effect_cookoil("enemy", :herbal)
-      elsif $game_actors[@user_id].state?(50) == true
-        item_effect_cookoil("ally", :normal)
-        item_effect_cookoil("enemy", :normal)
-        echinacea_effect("ally")
-        echinacea_effect("enemy")
-      elsif $game_actors[@user_id].state?(51) == true
-        item_effect_cookoil("ally", :normal)
-        item_effect_cookoil("enemy", :normal)
-        mercury_effect("ally")
-        mercury_effect("enemy")
-      else 
-        item_effect_cookoil("ally", :normal)
-        item_effect_cookoil("enemy", :normal)
+      # Chemist Passive: Restore 1 MP when consuming an item
+      if self.actor? && self.class_id == ChemistConfig::CHEMIST_CLASS_ID
+        self.mp += 1
       end
     end
     
-    # Clean up Chemist modifier states after the item effect resolves.
-    # NOTE: False alchemy is cleaned up in its own method.
-    chemist_states = [47, 48, 49, 50, 51]
-    chemist_states.each do |state_id|
-      if $game_actors[@user_id].state?(state_id)
-        $game_actors[@user_id].remove_state(state_id)
+    # Proceed with normal consumption (removes 1 from inventory)
+    chemist_consume_item(item)
+  end
+end
+
+# ==============================================================================
+# Custom Item Mechanics
+# ==============================================================================
+
+module ChemistConfig
+  # --- Phase 2 Configuration ---
+  FERTILIZER_ITEM_ID = 12
+  MARTYRS_JOY_ITEM_ID = 13
+  COOKING_OIL_ITEM_ID = 16
+  
+  OILY_STATE_ID = 53
+  MARTYRS_JOY_STATE_ID = 68
+end
+
+#===============================================================================
+# ** Scene_Battle
+#===============================================================================
+class Scene_Battle < Scene_Base
+  alias chemist_custom_use_item use_item
+  def use_item
+    item = @subject.current_action.item
+    
+    if item.is_a?(RPG::Item)
+      # 1. Cooking Oil: Apply Oily state to the user as well
+      if item.id == ChemistConfig::COOKING_OIL_ITEM_ID
+        @subject.add_state(ChemistConfig::OILY_STATE_ID)
+      end
+      
+      # 2. Fertilizer: Speed up all growing seeds
+      if item.id == ChemistConfig::FERTILIZER_ITEM_ID
+        if $Seeds_growing && !$Seeds_growing.empty?
+          $Seeds_growing.each { |seed| seed.grow() }
+        end
+      end
+    end
+
+    # Proceed with the engine's normal item execution
+    chemist_custom_use_item
+  end
+end
+
+#===============================================================================
+# ** Game_Battler
+#===============================================================================
+class Game_Battler < Game_BattlerBase
+  # 3. Martyr's Joy: Instantly kill the actor when the state naturally expires
+  alias chemist_update_state_turns update_state_turns
+  def update_state_turns
+    martyr_expired = false
+    
+    # Check if the Martyr state is currently at 1 turn (meaning it's about to hit 0 and expire)
+    @state_turns.each do |state_id, turns|
+      if state_id == ChemistConfig::MARTYRS_JOY_STATE_ID && turns == 1
+        martyr_expired = true
+      end
+    end
+    
+    # Let the engine tick the turns down
+    chemist_update_state_turns
+    
+    # If the state expired this tick, apply death
+    if martyr_expired && !dead?
+      self.add_state(death_state_id)
+      self.perform_collapse_effect
+    end
+  end
+end
+
+# ==============================================================================
+# Chemist skills
+# ==============================================================================
+
+module ChemistConfig
+  # --- Phase 3 Configuration ---
+  MIX_STATES = {
+    herbal: 47,
+    diluent: 48,
+    gunpowder: 49,
+    echinacea: 50,
+    mercury: 51,
+    false_alchemy: 54
+  }
+  
+  POISON_STATE_ID = 2 # Default RPG Maker VX Ace Poison state
+  
+  # Maps Original State ID => { Mix Type => Alternate State ID }
+  STATE_REPLACEMENTS = {
+    52 => { herbal: 56, diluent: 57 }, # Invisible Variations
+    53 => { herbal: 58, gunpowder: 58, diluent: 59 } # Oily Variations
+  }
+end
+
+#===============================================================================
+# ** Game_Action
+#===============================================================================
+class Game_Action
+  # 1. Diluent Scope Modification (Changes single target to All)
+  alias chemist_make_targets make_targets
+  def make_targets
+    targets = chemist_make_targets
+    if item.is_a?(RPG::Item) && subject.state?(ChemistConfig::MIX_STATES[:diluent])
+      if item.for_friend? && !item.for_all?
+        targets = friends_unit.alive_members
+      elsif item.for_opponent? && !item.for_all?
+        targets = opponents_unit.alive_members
+      elsif item.for_dead_friend? && !item.for_all?
+        targets = friends_unit.dead_members
+      end
+    end
+    targets
+  end
+end
+
+#===============================================================================
+# ** Game_Battler
+#===============================================================================
+class Game_Battler < Game_BattlerBase
+  
+  # 2. Damage and Healing Modification (Herbal, Gunpowder, Diluent)
+  alias chemist_make_damage_value make_damage_value
+  def make_damage_value(user, item)
+    chemist_make_damage_value(user, item)
+    if item.is_a?(RPG::Item)
+      multiplier = 1.0
+      
+      # Diluent reduces effectiveness by 50%
+      multiplier *= 0.5 if user.state?(ChemistConfig::MIX_STATES[:diluent])
+      
+      # Herbal doubles healing (Healing is represented as negative damage)
+      if user.state?(ChemistConfig::MIX_STATES[:herbal]) && (@result.hp_damage < 0 || @result.mp_damage < 0)
+        multiplier *= 2.0
+      end
+      
+      # Gunpowder doubles damage
+      if user.state?(ChemistConfig::MIX_STATES[:gunpowder]) && (@result.hp_damage > 0 || @result.mp_damage > 0)
+        multiplier *= 2.0
+      end
+      
+      @result.hp_damage = (@result.hp_damage * multiplier).to_i
+      @result.mp_damage = (@result.mp_damage * multiplier).to_i
+    end
+  end
+
+  # 3. Echinacea Flagging and Mercury Poisoning
+  alias chemist_item_apply item_apply
+  def item_apply(user, item)
+    @echinacea_cleared = false # Reset flag per target
+    
+    chemist_item_apply(user, item)
+    
+    # Mercury: Apply Poison if the item successfully hit
+    if item.is_a?(RPG::Item) && @result.hit? && user.state?(ChemistConfig::MIX_STATES[:mercury])
+      self.add_state(ChemistConfig::POISON_STATE_ID)
+    end
+  end
+
+  # 4. Echinacea Cleansing
+  alias chemist_item_effect_apply item_effect_apply
+  def item_effect_apply(user, item, effect)
+    # Clear target's states/buffs immediately before the FIRST effect is applied
+    if item.is_a?(RPG::Item) && user.state?(ChemistConfig::MIX_STATES[:echinacea])
+      unless @echinacea_cleared
+        self.clear_states
+        self.clear_buffs
+        @echinacea_cleared = true
+      end
+    end
+    chemist_item_effect_apply(user, item, effect)
+  end
+
+  # 5. State Replacements (Invisible / Oily versions)
+  alias chemist_item_effect_add_state item_effect_add_state
+  def item_effect_add_state(user, item, effect)
+    mod_effect = effect.clone
+    
+    if ChemistConfig::STATE_REPLACEMENTS[mod_effect.data_id]
+      rep = ChemistConfig::STATE_REPLACEMENTS[mod_effect.data_id]
+      if user.state?(ChemistConfig::MIX_STATES[:herbal]) && rep[:herbal]
+        mod_effect.data_id = rep[:herbal]
+      elsif user.state?(ChemistConfig::MIX_STATES[:gunpowder]) && rep[:gunpowder]
+        mod_effect.data_id = rep[:gunpowder]
+      elsif user.state?(ChemistConfig::MIX_STATES[:diluent]) && rep[:diluent]
+        mod_effect.data_id = rep[:diluent]
+      end
+    end
+    
+    chemist_item_effect_add_state(user, item, mod_effect)
+  end
+
+  # 6. Buff Duration Modification
+  alias chemist_item_effect_add_buff item_effect_add_buff
+  def item_effect_add_buff(user, item, effect)
+    chemist_item_effect_add_buff(user, item, effect)
+    param_id = effect.data_id
+    if @buff_turns[param_id]
+      if user.state?(ChemistConfig::MIX_STATES[:herbal])
+        @buff_turns[param_id] = effect.value1 * 2
+      elsif user.state?(ChemistConfig::MIX_STATES[:diluent])
+        @buff_turns[param_id] = (effect.value1 / 2.0).ceil
       end
     end
   end
-#===============================================================================
-# ** Item effects
-#===============================================================================
-#
-#-------------------------------------------------------------------------------
-# * Balm & Salve
-#-------------------------------------------------------------------------------
-def item_effect_balmSalve(mod)
-  @hp_restored = $game_actors[@target_id].mhp * mod;
-  @hp_restored /= 100;
-  $game_actors[@target_id].hp += @hp_restored
-  SceneManager.scene.log_window.add_text(
-    $game_actors[@target_id].name + " recovered " + 
-    @hp_restored.to_s + " HP!"
-    )
-  SceneManager.scene.log_window.wait
-end
-
-#-------------------------------------------------------------------------------
-# * Elixir
-#-------------------------------------------------------------------------------
-def item_effect_elixir(mod)
-  @hp_restored = $game_actors[@target_id].mhp * mod;
-  @mp_restored = $game_actors[@target_id].mmp * mod;
-  @hp_restored /= 100;
-  @mp_restored /= 100;
-  $game_actors[@target_id].hp += @hp_restored
-  SceneManager.scene.log_window.add_text(
-    $game_actors[@target_id].name + " recovered " + 
-    @hp_restored.to_s + " HP!"
-    )
-  SceneManager.scene.log_window.wait
-  $game_actors[@target_id].mp += @mp_restored
-  SceneManager.scene.log_window.add_text(
-    $game_actors[@target_id].name + " recovered " + 
-    @mp_restored.to_s + " MP!"
-    )
-  SceneManager.scene.log_window.wait
-end
-
-#-------------------------------------------------------------------------------
-# * Fulminating mercury
-#-------------------------------------------------------------------------------
-def item_effect_fulmerc(mod)
-  @dmg_dealt = 
-    (10 + (($game_actors[@user_id].mat) * mod) / 3)
-    - ($game_troop.members[@target_index].mdf / 4);
-  @dmg_dealt /= 100;
-  $game_troop.members[@target_index].hp -= @dmg_dealt
-  SceneManager.scene.log_window.add_text(
-    $game_troop.members[@target_index].name + " received " + 
-    @dmg_dealt.to_s + " damage!"
-    )
-  SceneManager.scene.log_window.wait
-  if $game_troop.members[@target_index].hp <= 0 then 
-    SceneManager.scene.log_window.add_text(
-      $game_troop.members[@target_index].name + " is slain!"
-      )
-    SceneManager.scene.log_window.wait
-    $game_troop.members[@target_index].hide();
-    $game_troop.members[@target_index].perform_collapse_effect
-    $game_troop.members[@target_index].die
-    else end
-end
-
-#-------------------------------------------------------------------------------
-# * Sharpening oil
-#-------------------------------------------------------------------------------
-def item_effect_sharpoil(mod)
-  $game_actors[@target_id].add_buff(2, mod)
-  SceneManager.scene.log_window.add_text(
-    $game_actors[@target_id].name + "'s ATK increased!"
-    )
-  SceneManager.scene.log_window.wait
-end
-
-#-------------------------------------------------------------------------------
-# * Chitin shard
-#-------------------------------------------------------------------------------
-def item_effect_chitshard(mod)
-  $game_actors[@target_id].add_buff(3, mod)
-  SceneManager.scene.log_window.add_text(
-    $game_actors[@target_id].name + "'s DEF increased!"
-    )
-  SceneManager.scene.log_window.wait
-end
-
-#-------------------------------------------------------------------------------
-# * Cup of coffee
-#-------------------------------------------------------------------------------
-def item_effect_cupocoff(mod)
-  $game_actors[@target_id].add_buff(4, mod)
-  SceneManager.scene.log_window.add_text(
-    $game_actors[@target_id].name + "'s MAT increased!"
-    )
-  SceneManager.scene.log_window.wait
-end
-
-#-------------------------------------------------------------------------------
-# * Ethereal gauze
-#-------------------------------------------------------------------------------
-def item_effect_ethgauze(mod)
-  $game_actors[@target_id].add_buff(5, mod)
-  SceneManager.scene.log_window.add_text(
-    $game_actors[@target_id].name + "'s MDF increased!"
-    )
-  SceneManager.scene.log_window.wait
-end
-
-#-------------------------------------------------------------------------------
-# * Red candle
-#-------------------------------------------------------------------------------
-def item_effect_redcandle(mod)
-  if $game_actors[@target_id].state?(1) == true then
-    @hp_restored = battle_info_targets[1].mhp * mod;
-    @hp_restored /= 100;
-    $game_actors[@target_id].hp += @hp_restored
-    $game_actors[@target_id].remove_state(1)
-    SceneManager.scene.log_window.add_text(
-      $game_actors[@target_id].name + " came back to life!"
-      )
-    SceneManager.scene.log_window.wait
-  else end
-end
-
-#-------------------------------------------------------------------------------
-# * Chungus chug
-#-------------------------------------------------------------------------------
-def item_effect_chungus(mod)
-  $game_actors[@target_id].add_buff(0, mod)
-  SceneManager.scene.log_window.add_text(
-    $game_actors[@target_id].name + "'s MHP increased!"
-    )
-  SceneManager.scene.log_window.wait
-end
-
-#-------------------------------------------------------------------------------
-# * Hunk o' meat
-#-------------------------------------------------------------------------------
-def item_effect_hunko(mod)
-  @hp_restored = $game_actors[@target_id].mhp * mod;
-  @hp_restored /= 100;
-  $game_actors[@target_id].hp += @hp_restored
-  SceneManager.scene.log_window.add_text(
-    $game_actors[@target_id].name + " recovered " + 
-    @hp_restored.to_s + " HP!"
-    )
-  SceneManager.scene.log_window.wait
-end
-
-#-------------------------------------------------------------------------------
-# * Martyr's Joy
-#-------------------------------------------------------------------------------
-#
-# See Common Event 058: Martyr's Joy processor
-
-#-------------------------------------------------------------------------------
-# * Ether
-#-------------------------------------------------------------------------------
-def item_effect_ether(mod)
-  @mp_restored = 1 * mod;
-  @mp_restored /= 100;
-  $game_actors[@target_id].mp += @mp_restored
-  SceneManager.scene.log_window.add_text(
-    $game_actors[@target_id].name + " recovered " + 
-    @mp_restored.to_s + " MP!"
-    )
-  SceneManager.scene.log_window.wait
-end
-
-#-------------------------------------------------------------------------------
-# * Invisibility potion
-#-------------------------------------------------------------------------------
-def item_effect_invispot(mod = :normal)
-  case mod
-  when :herbal
-    state_id = 101 # REPLACE WITH YOUR INVISIBILITY (HERBAL) STATE ID
-  when :diluent
-    state_id = 102 # REPLACE WITH YOUR INVISIBILITY (DILUENT) STATE ID
-  else
-    state_id = 52  # Normal Invisibility
-  end
   
-  $game_actors[@target_id].add_state(state_id)
-end
-
-#-------------------------------------------------------------------------------
-# * Cooking oil
-#-------------------------------------------------------------------------------
-def item_effect_cookoil(scope, mod = :normal)
-  case mod
-  when :herbal
-    state_id = 103 # REPLACE WITH YOUR COOKING OIL (HERBAL) STATE ID
-  when :diluent
-    state_id = 104 # REPLACE WITH YOUR COOKING OIL (DILUENT) STATE ID
-  else
-    state_id = 53  # Normal Cooking Oil
+  # 7. Debuff Duration Modification
+  alias chemist_item_effect_add_debuff item_effect_add_debuff
+  def item_effect_add_debuff(user, item, effect)
+    chemist_item_effect_add_debuff(user, item, effect)
+    param_id = effect.data_id
+    if @buff_turns[param_id]
+      if user.state?(ChemistConfig::MIX_STATES[:gunpowder])
+        @buff_turns[param_id] = effect.value1 * 2
+      elsif user.state?(ChemistConfig::MIX_STATES[:diluent])
+        @buff_turns[param_id] = (effect.value1 / 2.0).ceil
+      end
+    end
   end
 
-  case scope
-  when "ally"
-    $game_actors[@target_id].add_state(state_id)
-    SceneManager.scene.log_window.add_text(
-      $game_actors[@target_id].name + " slips in oil!"
-      )
-    SceneManager.scene.log_window.wait
-  when "enemy"
-    $game_troop.members[@target_index].add_state(state_id)
-    SceneManager.scene.log_window.add_text(
-       $game_troop.members[@target_index].name + " slips in oil!"
-      )
-    SceneManager.scene.log_window.wait
-  else end
+  # 8. False Alchemy (Duplication via non-consumption)
+  alias chemist_phase3_consume_item consume_item
+  def consume_item(item)
+    if item.is_a?(RPG::Item) && ChemistConfig.is_consumable?(item)
+      if self.state?(ChemistConfig::MIX_STATES[:false_alchemy])
+        
+        # Grant the passive MP restore since we are skipping the Phase 1 block
+        if self.actor? && self.class_id == ChemistConfig::CHEMIST_CLASS_ID
+          self.mp += 1
+        end
+        
+        # Remove the state, but do NOT call the original consume_item!
+        self.remove_state(ChemistConfig::MIX_STATES[:false_alchemy])
+        return 
+      end
+    end
+    chemist_phase3_consume_item(item)
+  end
 end
 
 #===============================================================================
-# ** Chemist skill and state effects
+# ** Scene_Battle
 #===============================================================================
-#
-#-------------------------------------------------------------------------------
-# * False alchemy
-#-------------------------------------------------------------------------------
-def falseAlchemy_effect()
-  user = battle_info_user
-  used_action = battle_info_used
-  
-  if user.is_a?(Game_Actor) && user.state?(54) && used_action.is_a?(RPG::Item)
-    $game_party.gain_item(used_action, 1)
+class Scene_Battle < Scene_Base
+  # 9. Clean up states and adjust Phase 2's Cooking Oil user-state
+  alias chemist_phase3_use_item use_item
+  def use_item
+    item = @subject.current_action.item
+    is_item = item.is_a?(RPG::Item)
     
-    # Remove the False Alchemy state so it only works once
-    user.remove_state(54) 
+    chemist_phase3_use_item # Runs Phase 2 and executes the item
     
-    SceneManager.scene.log_window.add_text(user.name + " synthesized a copy of the item!")
-    SceneManager.scene.log_window.wait
-  end
-end
-
-#-------------------------------------------------------------------------------
-# * Echinacea
-#-------------------------------------------------------------------------------
-def echinacea_effect(scope)
-  case scope
-  when "ally"
-    $game_actors[@target_id].clear_states()
-    $game_actors[@target_id].remove_all_buffs()
-    SceneManager.scene.log_window.add_text(
-      $game_actors[@target_id].name + " was refreshed!"
-      )
-    SceneManager.scene.log_window.wait
-  when "allies"
-    @party_size = $game_party.members().length
-    i = 1
-    until i > @party_size do
-      $game_actors[battle_info_targets[i].id].clear_states
-      $game_actors[battle_info_targets[i].id].remove_all_buffs
-      SceneManager.scene.log_window.add_text(
-        $game_actors[i].name + " was refreshed!"
-        )
-      SceneManager.scene.log_window.wait
-      i += 1
+    if is_item
+      # Adjust the Oily state Phase 2 applied to the user if necessary
+      if item.id == ChemistConfig::COOKING_OIL_ITEM_ID && @subject.state?(ChemistConfig::OILY_STATE_ID)
+        rep = ChemistConfig::STATE_REPLACEMENTS[ChemistConfig::OILY_STATE_ID]
+        new_state = nil
+        if @subject.state?(ChemistConfig::MIX_STATES[:herbal])
+          new_state = rep[:herbal]
+        elsif @subject.state?(ChemistConfig::MIX_STATES[:gunpowder])
+          new_state = rep[:gunpowder]
+        elsif @subject.state?(ChemistConfig::MIX_STATES[:diluent])
+          new_state = rep[:diluent]
+        end
+        
+        if new_state
+          @subject.remove_state(ChemistConfig::OILY_STATE_ID)
+          @subject.add_state(new_state)
+        end
+      end
+      
+      # Now wipe all Mix states (False alchemy is wiped in consume_item)
+      ChemistConfig::MIX_STATES.each do |key, state_id|
+        if key != :false_alchemy 
+          @subject.remove_state(state_id)
+        end
+      end
     end
-  when "enemy"
-    $game_troop.members[@target_index].clear_states()
-    $game_troop.members[@target_index].remove_all_buffs()
-    SceneManager.scene.log_window.add_text(
-      $game_troop.members[@target_index].name + " was refreshed!"
-      )
-    SceneManager.scene.log_window.wait
-  when "enemies"
-    foo = 1
-  end
-end
-
-#-------------------------------------------------------------------------------
-# * Mercury
-#-------------------------------------------------------------------------------
-def mercury_effect(scope)
-  case scope
-  when "ally"
-    $game_actors[@target_id].add_state(2)
-    SceneManager.scene.log_window.add_text(
-      $game_actors[@target_id].name + " was poisoned!"
-      )
-    SceneManager.scene.log_window.wait
-  when "allies"
-    @party_size = $game_party.members().length
-    i = 1
-    until i > @party_size do
-      $game_actors[@target_id].add_state(2)
-      SceneManager.scene.log_window.add_text(
-        $game_actors[i].name + " was poisoned!"
-        )
-      SceneManager.scene.log_window.wait
-      i += 1
-    end
-  when "enemy"
-    $game_troop.members[@target_index].add_state(2)
-    SceneManager.scene.log_window.add_text(
-      $game_troop.members[@target_index].name + " was poisoned!"
-      )
-    SceneManager.scene.log_window.wait
-  when "enemies"
-    foo = 1
   end
 end
