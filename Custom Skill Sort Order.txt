@@ -1,0 +1,39 @@
+#==============================================================================
+# Custom Skill Sort Order
+#==============================================================================
+# Use the following notetag in a Skill's note box to define its order:
+#   <sort_order: x>
+#
+# For example, <sort_order: 100> will appear before <sort_order: 101>.
+# Skills without this tag will automatically be sent to the bottom of the
+# list and will be sorted by their standard Database ID.
+#==============================================================================
+
+class RPG::Skill < RPG::UsableItem
+  def custom_sort_order
+    # Caches the value so it doesn't run the regex every time the menu is drawn
+    return @custom_sort_order unless @custom_sort_order.nil?
+    
+    if self.note =~ /<sort_order:\s*(\d+)>/i
+      @custom_sort_order = $1.to_i
+    else
+      @custom_sort_order = 999999 # Untagged skills drop to the bottom
+    end
+    return @custom_sort_order
+  end
+end
+
+class Window_SkillList < Window_Selectable
+  
+  alias :custom_sort_make_item_list :make_item_list
+  def make_item_list
+    # Run the original method to populate the @data array
+    custom_sort_make_item_list
+    
+    # Sort the array first by the custom value, then by the original ID
+    if @data && !@data.empty?
+      @data.sort_by! { |skill| [skill.custom_sort_order, skill.id] }
+    end
+  end
+  
+end

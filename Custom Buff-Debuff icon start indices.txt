@@ -1,0 +1,22 @@
+#==============================================================================
+# ** Custom Buff/Debuff Icon Start Indices (CORRECTED)
+#------------------------------------------------------------------------------
+# Overwrites the default icon calculation to use new starting indices
+# without triggering Ruby constant reassignment warnings.
+#==============================================================================
+
+class Game_BattlerBase
+  #--------------------------------------------------------------------------
+  # * Overwrite: Get Buff/Debuff Icon Number
+  #--------------------------------------------------------------------------
+  def buff_icon_index(buff_level, param_id)
+    return 0 if buff_level == 0
+    if buff_level > 0
+      # Replaces ICON_BUFF_START (Default 64) with 32
+      return 32 + (buff_level - 1) * 8 + param_id 
+    else
+      # Replaces ICON_DEBUFF_START (Default 80) with 48
+      return 48 + (-buff_level - 1) * 8 + param_id 
+    end
+  end
+end
