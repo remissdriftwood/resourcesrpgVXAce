@@ -27,6 +27,16 @@ module CultivatorConfig
     :metal => 16
   }
   
+  # --- ELEMENT IDs ---
+  # Maps the symbol to the actual Element ID in the RPG Maker Database
+  ELEMENT_IDS = {
+    :fire  => 3,
+    :water => 6,
+    :earth => 7,
+    :metal => 11,
+    :wood  => 12
+  }
+  
   # --- NEW: ELEMENT COMBAT EFFECTS ---
   
   # WATER: Restores Party HP equal to MAT * multiplier
@@ -1059,4 +1069,46 @@ class Game_Battler < Game_BattlerBase
     cultivator_cm_item_effect_grow(user, item, effect)
   end
 
+end
+
+# ------------------------------------------------------------------------------
+# Cultivator System - Imbued Element Damage Application
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** Game_Battler
+# Hooking into element rate calculations to add the imbued element
+#===============================================================================
+class Game_Battler < Game_BattlerBase
+  
+  #-----------------------------------------------------------------------------
+  # * Alias: Item Element Rate
+  #   Calculates the final elemental multiplier for damage
+  #-----------------------------------------------------------------------------
+  alias cultivator_imbued_item_element_rate item_element_rate
+  def item_element_rate(user, item)
+    # 1. Get the engine's default damage multiplier for the skill/attack's base element
+    base_rate = cultivator_imbued_item_element_rate(user, item)
+    
+    # 2. Check if the user is an active Cultivator with an imbued element
+    if user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
+      element_symbol = user.cultivator_element
+      
+      # 3. If they have an element, fetch its database ID
+      if element_symbol && CultivatorConfig::ELEMENT_IDS.has_key?(element_symbol)
+        imbued_element_id = CultivatorConfig::ELEMENT_IDS[element_symbol]
+        
+        # 4. Get the target's elemental multiplier for the imbued element
+        imbued_rate = element_rate(imbued_element_id)
+        
+        # 5. RPG Maker natively uses the highest multiplier for multi-element attacks.
+        # We compare the skill's base rate with the imbued rate and return the highest.
+        return [base_rate, imbued_rate].max
+      end
+    end
+    
+    # If no element is imbued, return the normal rate
+    base_rate
+  end
+  
 end
