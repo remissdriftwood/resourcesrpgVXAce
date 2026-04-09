@@ -9,28 +9,22 @@ class Game_Action
   # * Override: Evaluate Item with Target
   #--------------------------------------------------------------------------
   def evaluate_item_with_target(target)
-    # Get the original base score for using this item on this target
     score = sh_custom_evaluate_item_with_target(target)
     
     if subject.is_a?(Game_Enemy)
       
-      # 1. Imp (ID 13) using Caduceus heart (ID 43)
-      if subject.enemy_id == 13 && item.id == 43
+      # 1. Imp (IDs 13, 14, 15) using Caduceus heart (ID 43)
+      if [13, 14, 15].include?(subject.enemy_id) && item.id == 43
         if target.hp_rate <= 0.33
-          # Strongly prioritize allies at or below 33% HP
           score += 10 
         else
-          # Return 0 so the AI completely ignores this target. 
-          # If all allies are above 33%, the total score for Caduceus heart 
-          # will be 0 and the Imp will do something else.
           return 0 
         end
       end
       
-      # 2. Carrion Eater (ID 25) focuses player characters <= 50% HP
-      if subject.enemy_id == 25 && target.is_a?(Game_Actor)
+      # 2. Carrion Eater (IDs 25, 26, 27) focuses player characters <= 50% HP
+      if [25, 26, 27].include?(subject.enemy_id) && target.is_a?(Game_Actor)
         if target.hp_rate <= 0.50
-          # Add 10 to the target score to ensure the AI prioritizes them
           score += 10 
         end
       end
@@ -41,35 +35,149 @@ class Game_Action
   end
 end
 
+class Game_Enemy < Game_Battler
+  # Add tracking variables
+  attr_accessor :leaguer_cri_bonus
+  attr_accessor :mimicked_actions
+  
+  #--------------------------------------------------------------------------
+  # * Override: Initialize
+  #--------------------------------------------------------------------------
+  alias sh_custom_enemy_initialize initialize
+  def initialize(index, enemy_id)
+    sh_custom_enemy_initialize(index, enemy_id)
+    
+    # --- Mimic Logic: Setup ---
+    if [31, 32, 33].include?(@enemy_id)
+      # Find all valid enemies to mimic (excluding empty slots, self, and enemies with no actions)
+      valid_enemies = $data_enemies.compact.select do |e| 
+        e.name != "" && ![31, 32, 33].include?(e.id) && !e.actions.empty?
+      end
+      
+      if valid_enemies.any?
+        # Store the action patterns of a random valid enemy
+        @mimicked_actions = valid_enemies.sample.actions
+      end
+    end
+  end
+
+  #--------------------------------------------------------------------------
+  # * Override: Make Actions
+  #--------------------------------------------------------------------------
+  alias sh_mimic_make_actions make_actions
+  def make_actions
+    # --- Mimic Logic: Execution ---
+    if @mimicked_actions
+      # Temporarily swap the global enemy actions with our mimicked actions
+      original_actions = enemy.actions
+      begin
+        enemy.instance_variable_set(:@actions, @mimicked_actions)
+        sh_mimic_make_actions
+      ensure
+        # Use 'ensure' to guarantee we ALWAYS revert the database object so it doesn't stay permanently changed
+        enemy.instance_variable_set(:@actions, original_actions)
+      end
+    else
+      sh_mimic_make_actions
+    end
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Override: Critical Hit Rate (cri)
+  #--------------------------------------------------------------------------
+  alias sh_leaguer_cri cri
+  def cri
+    @leaguer_cri_bonus ||= 0.0
+    return sh_leaguer_cri + @leaguer_cri_bonus
+  end
+end
+
 class Game_Battler < Game_BattlerBase
-  alias sh_carrion_eater_die die
+  attr_accessor :digested_by
+  
+  #--------------------------------------------------------------------------
+  # * Override: Apply Item/Skill Effect
+  #--------------------------------------------------------------------------
+  alias sh_digest_item_apply item_apply
+  def item_apply(user, item)
+    sh_digest_item_apply(user, item)
+    
+    # 3. Digest (Skill 159 applying State 13)
+    # Notice we use 'user' to grab the enemy, and 'self' because we are currently inside the target's methods
+    if item.is_a?(RPG::Skill) && item.id == 159 && self.result.added_states.include?(13)
+      self.digested_by = user
+    end
+  end
+
+  #--------------------------------------------------------------------------
+  # * Override: Remove State (Cleanup)
+  #--------------------------------------------------------------------------
+  alias sh_digest_remove_state remove_state
+  def remove_state(state_id)
+    sh_digest_remove_state(state_id)
+    @digested_by = nil if state_id == 13
+  end
   
   #--------------------------------------------------------------------------
   # * Override: Execute Death
   #--------------------------------------------------------------------------
+  alias sh_custom_enemy_die die
   def die
     was_dead = dead?
+    was_digested = self.state?(13)
+    digester = @digested_by
     
-    # Run original death processing
-    sh_carrion_eater_die
+    sh_custom_enemy_die
     
-    # 3. Carrion Eater Devour Mechanic
-    # Check if a battler just died, is an enemy, and we are in combat
-    if !was_dead && dead? && self.is_a?(Game_Enemy) && $game_party.in_battle
+    if !was_dead && dead?
       
-      # Find all living Carrion Eaters (ID 25) excluding the one that just died
-      carrion_eaters = $game_troop.alive_members.select { |enemy| enemy.enemy_id == 25 && enemy != self }
-      
-      unless carrion_eaters.empty?
-        carrion_eaters.each do |carrion|
-          # Heal them to full
-          carrion.hp = carrion.mhp
-        end
-        
-        # Display message using your Battle Log Accessor script
+      # --- Digest Logic: Prey Dies ---
+      if was_digested && digester && digester.alive?
+        heal_amount = (digester.mhp * 0.25).to_i
+        digester.hp += heal_amount
         if SceneManager.scene.is_a?(Scene_Battle)
-          SceneManager.scene.log_window.add_text("Carrion Eater devours its fallen comrade! Carrion Eater is healed to full HP!")
+          SceneManager.scene.log_window.add_text("#{digester.name} finishes digesting its prey and recovers HP!")
           SceneManager.scene.log_window.wait
+        end
+      end
+      
+      # --- Digest Logic: Digester Dies ---
+      if self.is_a?(Game_Enemy) && $game_party.in_battle
+        $game_party.members.each do |actor|
+          if actor.digested_by == self && actor.state?(13)
+            actor.remove_state(13) 
+          end
+        end
+      end
+      
+      # --- Carrion Eater Logic ---
+      if self.is_a?(Game_Enemy) && $game_party.in_battle
+        carrion_eaters = $game_troop.alive_members.select { |enemy| [25, 26, 27].include?(enemy.enemy_id) && enemy != self }
+        unless carrion_eaters.empty?
+          carrion_eaters.each do |carrion|
+            carrion.hp = carrion.mhp
+          end
+          if SceneManager.scene.is_a?(Scene_Battle)
+            SceneManager.scene.log_window.add_text("Carrion Eater devours its fallen comrade! Carrion Eater is healed to full HP!")
+            SceneManager.scene.log_window.wait
+          end
+        end
+      end
+      
+      # --- Leaguer Logic ---
+      if $game_party.in_battle
+        leaguers = $game_troop.alive_members.select { |enemy| [28, 29, 30].include?(enemy.enemy_id) && enemy != self }
+        
+        unless leaguers.empty?
+          leaguers.each do |leaguer|
+            leaguer.leaguer_cri_bonus ||= 0.0
+            leaguer.leaguer_cri_bonus += 0.05
+            
+            if SceneManager.scene.is_a?(Scene_Battle)
+              SceneManager.scene.log_window.add_text("#{leaguer.name} relishes the gore of battle!")
+              SceneManager.scene.log_window.wait
+            end
+          end
         end
       end
       
