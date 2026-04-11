@@ -20,10 +20,10 @@ module CultivatorConfig
 
   # Icon IDs for each element
   ELEMENT_ICONS = {
-    :water => 79, 
-    :fire  => 81, 
-    :wood  => 114,
-    :earth => 80, 
+    :water => 95, 
+    :fire  => 97, 
+    :wood  => 130,
+    :earth => 96, 
     :metal => 16
   }
   
@@ -69,11 +69,11 @@ module CultivatorConfig
   
   # The animation that plays on the enemy when the flying sword hits them. 
   # (1 is usually the basic sword slash)
-  FLYING_SWORD_ANIM_ID = 1
+  FLYING_SWORD_ANIM_ID = 7
   
   # --- ENERGY SWORDS ---
   ENERGY_SWORDS_STATE_ID = 61
-  ENERGY_SWORD_ANIM_ID = 1
+  ENERGY_SWORD_ANIM_ID = 11
   
   # --- YUANYING ---
   YUANYING_STATE_ID = 62
@@ -236,6 +236,16 @@ end
 class Game_Interpreter
   
   def interact_elixir(type, element, override = nil)
+    # Automatically fix typos by forcing inputs to be lowercase symbols
+    type = type.to_s.downcase.to_sym if type
+    element = element.to_s.downcase.to_sym if element
+    
+    # If the element is :random, roll a valid element from the config
+    if element == :random
+      valid_elements = CultivatorConfig::ELEMENT_NAMES.keys
+      element = valid_elements[rand(valid_elements.size)]
+    end
+    
     $Game_Elixirs ||= {} 
     
     elixir_id = "#{@map_id}_#{@event_id}"
@@ -687,7 +697,7 @@ class Scene_Battle < Scene_Base
     if item.is_a?(RPG::UsableItem) && item.is_earth_call? && user.is_a?(Game_Actor)
       mp_amount, elem_name = user.perform_earth_call
       
-      @log_window.add_text("#{user.name} channeled the earth!")
+      @log_window.add_text("#{user.name} channels nature!")
       @log_window.add_text("Restored #{mp_amount} MP and imbued #{elem_name}!")
       @log_window.wait
       
