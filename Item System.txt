@@ -1,19 +1,43 @@
 # ==============================================================================
-# Item System - Core
+# The Chemist System (Unified)
 # ==============================================================================
 
 module ChemistConfig
   CHEMIST_CLASS_ID = 5
   
+  # Item IDs
+  FERTILIZER_ITEM_ID = 12
+  MARTYRS_JOY_ITEM_ID = 13
+  COOKING_OIL_ITEM_ID = 16
+  
+  # State IDs
+  OILY_STATE_ID = 53
+  MARTYRS_JOY_STATE_ID = 68
+  POISON_STATE_ID = 2
+  
+  MIX_STATES = {
+    herbal: 47,
+    diluent: 48,
+    gunpowder: 49,
+    echinacea: 50,
+    mercury: 51,
+    false_alchemy: 54
+  }
+  
+  # Maps Original State ID => { Mix Type => Alternate State ID }
+  STATE_REPLACEMENTS = {
+    52 => { herbal: 56, diluent: 57 }, # Invisible Variations
+    53 => { herbal: 58, gunpowder: 58, diluent: 59 } # Oily Variations
+  }
+
   # Helper method to check if an item is a "Regular Item" (Consumable)
-  # itype_id == 1 is the default for Regular Items in the Database.
   def self.is_consumable?(item)
     item.is_a?(RPG::Item) && item.itype_id == 1
   end
 end
 
 #===============================================================================
-# ** Game_Party
+# ** Game_Party (Phase 1: Capacity & Restoration)
 #===============================================================================
 class Game_Party < Game_Unit
   attr_accessor :items_used_in_battle
@@ -24,7 +48,6 @@ class Game_Party < Game_Unit
     @items_used_in_battle = []
   end
 
-  # Force maximum capacity of 1 for all Regular Items
   alias chemist_max_item_number max_item_number
   def max_item_number(item)
     if ChemistConfig.is_consumable?(item)
@@ -34,14 +57,12 @@ class Game_Party < Game_Unit
     end
   end
 
-  # Clear the tracking array at the start of battle
   alias chemist_on_battle_start on_battle_start
   def on_battle_start
     chemist_on_battle_start
     @items_used_in_battle = []
   end
 
-  # Restore all consumed regular items at the end of battle
   alias chemist_on_battle_end on_battle_end
   def on_battle_end
     chemist_on_battle_end
@@ -53,129 +74,13 @@ class Game_Party < Game_Unit
 end
 
 #===============================================================================
-# ** Game_Battler
-#===============================================================================
-class Game_Battler < Game_BattlerBase
-  alias chemist_consume_item consume_item
-  def consume_item(item)
-    if ChemistConfig.is_consumable?(item)
-      # Add to tracking array if we are in battle
-      if $game_party.in_battle
-        $game_party.items_used_in_battle.push(item)
-      end
-      
-      # Chemist Passive: Restore 1 MP when consuming an item
-      if self.actor? && self.class_id == ChemistConfig::CHEMIST_CLASS_ID
-        self.mp += 1
-      end
-    end
-    
-    # Proceed with normal consumption (removes 1 from inventory)
-    chemist_consume_item(item)
-  end
-end
-
-# ==============================================================================
-# Custom Item Mechanics
-# ==============================================================================
-
-module ChemistConfig
-  # --- Phase 2 Configuration ---
-  FERTILIZER_ITEM_ID = 12
-  MARTYRS_JOY_ITEM_ID = 13
-  COOKING_OIL_ITEM_ID = 16
-  
-  OILY_STATE_ID = 53
-  MARTYRS_JOY_STATE_ID = 68
-end
-
-#===============================================================================
-# ** Scene_Battle
-#===============================================================================
-class Scene_Battle < Scene_Base
-  alias chemist_custom_use_item use_item
-  def use_item
-    item = @subject.current_action.item
-    
-    if item.is_a?(RPG::Item)
-      # 1. Cooking Oil: Apply Oily state to the user as well
-      if item.id == ChemistConfig::COOKING_OIL_ITEM_ID
-        @subject.add_state(ChemistConfig::OILY_STATE_ID)
-      end
-      
-      # 2. Fertilizer: Speed up all growing seeds
-      if item.id == ChemistConfig::FERTILIZER_ITEM_ID
-        if $Seeds_growing && !$Seeds_growing.empty?
-          $Seeds_growing.each { |seed| seed.grow() }
-        end
-      end
-    end
-
-    # Proceed with the engine's normal item execution
-    chemist_custom_use_item
-  end
-end
-
-#===============================================================================
-# ** Game_Battler
-#===============================================================================
-class Game_Battler < Game_BattlerBase
-  # 3. Martyr's Joy: Instantly kill the actor when the state naturally expires
-  alias chemist_update_state_turns update_state_turns
-  def update_state_turns
-    martyr_expired = false
-    
-    # Check if the Martyr state is currently at 1 turn (meaning it's about to hit 0 and expire)
-    @state_turns.each do |state_id, turns|
-      if state_id == ChemistConfig::MARTYRS_JOY_STATE_ID && turns == 1
-        martyr_expired = true
-      end
-    end
-    
-    # Let the engine tick the turns down
-    chemist_update_state_turns
-    
-    # If the state expired this tick, apply death
-    if martyr_expired && !dead?
-      self.add_state(death_state_id)
-      self.perform_collapse_effect
-    end
-  end
-end
-
-# ==============================================================================
-# Chemist skills
-# ==============================================================================
-
-module ChemistConfig
-  # --- Phase 3 Configuration ---
-  MIX_STATES = {
-    herbal: 47,
-    diluent: 48,
-    gunpowder: 49,
-    echinacea: 50,
-    mercury: 51,
-    false_alchemy: 54
-  }
-  
-  POISON_STATE_ID = 2 # Default RPG Maker VX Ace Poison state
-  
-  # Maps Original State ID => { Mix Type => Alternate State ID }
-  STATE_REPLACEMENTS = {
-    52 => { herbal: 56, diluent: 57 }, # Invisible Variations
-    53 => { herbal: 58, gunpowder: 58, diluent: 59 } # Oily Variations
-  }
-end
-
-#===============================================================================
-# ** Game_Action
+# ** Game_Action (Phase 3: Scope Modifications)
 #===============================================================================
 class Game_Action
-  # 1. Diluent Scope Modification (Changes single target to All)
   alias chemist_make_targets make_targets
   def make_targets
     targets = chemist_make_targets
-    if item.is_a?(RPG::Item) && subject.state?(ChemistConfig::MIX_STATES[:diluent])
+    if item.is_a?(RPG::Item) && subject.has_mix?(:diluent)
       if item.for_friend? && !item.for_all?
         targets = friends_unit.alive_members
       elsif item.for_opponent? && !item.for_all?
@@ -189,27 +94,99 @@ class Game_Action
 end
 
 #===============================================================================
-# ** Game_Battler
+# ** Game_BattlerBase (Phase 3: Mix Caching)
+#===============================================================================
+class Game_BattlerBase
+  attr_accessor :chemist_mix_cache
+  
+  def has_mix?(mix_key)
+    if @chemist_mix_cache
+      @chemist_mix_cache[mix_key]
+    else
+      state?(ChemistConfig::MIX_STATES[mix_key])
+    end
+  end
+end
+
+#===============================================================================
+# ** Game_Battler (Phase 1, 2 & 3: Execution Logic)
 #===============================================================================
 class Game_Battler < Game_BattlerBase
   
-  # 2. Damage and Healing Modification (Herbal, Gunpowder, Diluent)
+  # --- Phase 1 & 3: Consumption and Passive MP ---
+  alias chemist_sys_consume_item consume_item
+  def consume_item(item)
+    if ChemistConfig.is_consumable?(item)
+      # Phase 3: False Alchemy Check
+      if self.state?(ChemistConfig::MIX_STATES[:false_alchemy])
+        if self.actor? && self.class_id == ChemistConfig::CHEMIST_CLASS_ID
+          self.mp += 1
+        end
+        self.remove_state(ChemistConfig::MIX_STATES[:false_alchemy])
+        return # Skip normal consumption!
+      end
+      
+      # Phase 1: Normal Consumption Tracking
+      if $game_party.in_battle
+        $game_party.items_used_in_battle.push(item)
+      end
+      
+      # Phase 1: Chemist Passive MP Restore
+      if self.actor? && self.class_id == ChemistConfig::CHEMIST_CLASS_ID
+        self.mp += 1
+      end
+    end
+    chemist_sys_consume_item(item)
+  end
+
+  # --- Phase 2: Martyr's Joy Delayed Death ---
+  alias chemist_update_state_turns update_state_turns
+  def update_state_turns
+    martyr_expired = false
+    @state_turns.each do |state_id, turns|
+      if state_id == ChemistConfig::MARTYRS_JOY_STATE_ID && turns == 1
+        martyr_expired = true
+      end
+    end
+    chemist_update_state_turns
+    if martyr_expired && !dead?
+      self.add_state(death_state_id)
+      self.perform_collapse_effect
+    end
+  end
+
+  # --- Phase 3: Echinacea Cleansing and Mercury Poisoning ---
+  alias chemist_item_apply item_apply
+  def item_apply(user, item)
+    is_chemist_item = item.is_a?(RPG::Item)
+    
+    # ECHINACEA: Strip states completely BEFORE the game tests for Full HP
+    if is_chemist_item && user.has_mix?(:echinacea)
+      self.clear_states
+      self.clear_buffs
+    end
+    
+    chemist_item_apply(user, item)
+    
+    # MERCURY: Apply Poison if the item successfully hit
+    if is_chemist_item && @result.hit? && user.has_mix?(:mercury)
+      self.add_state(ChemistConfig::POISON_STATE_ID)
+    end
+  end
+
+  # --- Phase 3: Damage and Healing Modification ---
   alias chemist_make_damage_value make_damage_value
   def make_damage_value(user, item)
     chemist_make_damage_value(user, item)
     if item.is_a?(RPG::Item)
       multiplier = 1.0
+      multiplier *= 0.5 if user.has_mix?(:diluent)
       
-      # Diluent reduces effectiveness by 50%
-      multiplier *= 0.5 if user.state?(ChemistConfig::MIX_STATES[:diluent])
-      
-      # Herbal doubles healing (Healing is represented as negative damage)
-      if user.state?(ChemistConfig::MIX_STATES[:herbal]) && (@result.hp_damage < 0 || @result.mp_damage < 0)
+      if user.has_mix?(:herbal) && (@result.hp_damage < 0 || @result.mp_damage < 0)
         multiplier *= 2.0
       end
       
-      # Gunpowder doubles damage
-      if user.state?(ChemistConfig::MIX_STATES[:gunpowder]) && (@result.hp_damage > 0 || @result.mp_damage > 0)
+      if user.has_mix?(:gunpowder) && (@result.hp_damage > 0 || @result.mp_damage > 0)
         multiplier *= 2.0
       end
       
@@ -218,122 +195,96 @@ class Game_Battler < Game_BattlerBase
     end
   end
 
-  # 3. Echinacea Flagging and Mercury Poisoning
-  alias chemist_item_apply item_apply
-  def item_apply(user, item)
-    @echinacea_cleared = false # Reset flag per target
-    
-    chemist_item_apply(user, item)
-    
-    # Mercury: Apply Poison if the item successfully hit
-    if item.is_a?(RPG::Item) && @result.hit? && user.state?(ChemistConfig::MIX_STATES[:mercury])
-      self.add_state(ChemistConfig::POISON_STATE_ID)
-    end
-  end
-
-  # 4. Echinacea Cleansing
-  alias chemist_item_effect_apply item_effect_apply
-  def item_effect_apply(user, item, effect)
-    # Clear target's states/buffs immediately before the FIRST effect is applied
-    if item.is_a?(RPG::Item) && user.state?(ChemistConfig::MIX_STATES[:echinacea])
-      unless @echinacea_cleared
-        self.clear_states
-        self.clear_buffs
-        @echinacea_cleared = true
-      end
-    end
-    chemist_item_effect_apply(user, item, effect)
-  end
-
-  # 5. State Replacements (Invisible / Oily versions)
+  # --- Phase 3: State Replacements ---
   alias chemist_item_effect_add_state item_effect_add_state
   def item_effect_add_state(user, item, effect)
     mod_effect = effect.clone
-    
     if ChemistConfig::STATE_REPLACEMENTS[mod_effect.data_id]
       rep = ChemistConfig::STATE_REPLACEMENTS[mod_effect.data_id]
-      if user.state?(ChemistConfig::MIX_STATES[:herbal]) && rep[:herbal]
+      if user.has_mix?(:herbal) && rep[:herbal]
         mod_effect.data_id = rep[:herbal]
-      elsif user.state?(ChemistConfig::MIX_STATES[:gunpowder]) && rep[:gunpowder]
+      elsif user.has_mix?(:gunpowder) && rep[:gunpowder]
         mod_effect.data_id = rep[:gunpowder]
-      elsif user.state?(ChemistConfig::MIX_STATES[:diluent]) && rep[:diluent]
+      elsif user.has_mix?(:diluent) && rep[:diluent]
         mod_effect.data_id = rep[:diluent]
       end
     end
-    
     chemist_item_effect_add_state(user, item, mod_effect)
   end
 
-  # 6. Buff Duration Modification
+  # --- Phase 3: Buff/Debuff Duration Modification ---
   alias chemist_item_effect_add_buff item_effect_add_buff
   def item_effect_add_buff(user, item, effect)
     chemist_item_effect_add_buff(user, item, effect)
     param_id = effect.data_id
     if @buff_turns[param_id]
-      if user.state?(ChemistConfig::MIX_STATES[:herbal])
+      if user.has_mix?(:herbal)
         @buff_turns[param_id] = effect.value1 * 2
-      elsif user.state?(ChemistConfig::MIX_STATES[:diluent])
+      elsif user.has_mix?(:diluent)
         @buff_turns[param_id] = (effect.value1 / 2.0).ceil
       end
     end
   end
   
-  # 7. Debuff Duration Modification
   alias chemist_item_effect_add_debuff item_effect_add_debuff
   def item_effect_add_debuff(user, item, effect)
     chemist_item_effect_add_debuff(user, item, effect)
     param_id = effect.data_id
     if @buff_turns[param_id]
-      if user.state?(ChemistConfig::MIX_STATES[:gunpowder])
+      if user.has_mix?(:gunpowder)
         @buff_turns[param_id] = effect.value1 * 2
-      elsif user.state?(ChemistConfig::MIX_STATES[:diluent])
+      elsif user.has_mix?(:diluent)
         @buff_turns[param_id] = (effect.value1 / 2.0).ceil
       end
     end
   end
-
-  # 8. False Alchemy (Duplication via non-consumption)
-  alias chemist_phase3_consume_item consume_item
-  def consume_item(item)
-    if item.is_a?(RPG::Item) && ChemistConfig.is_consumable?(item)
-      if self.state?(ChemistConfig::MIX_STATES[:false_alchemy])
-        
-        # Grant the passive MP restore since we are skipping the Phase 1 block
-        if self.actor? && self.class_id == ChemistConfig::CHEMIST_CLASS_ID
-          self.mp += 1
-        end
-        
-        # Remove the state, but do NOT call the original consume_item!
-        self.remove_state(ChemistConfig::MIX_STATES[:false_alchemy])
-        return 
-      end
-    end
-    chemist_phase3_consume_item(item)
-  end
 end
 
 #===============================================================================
-# ** Scene_Battle
+# ** Scene_Battle (Phase 2 & 3: Custom Item Use Logic & Cleanup)
 #===============================================================================
 class Scene_Battle < Scene_Base
-  # 9. Clean up states and adjust Phase 2's Cooking Oil user-state
-  alias chemist_phase3_use_item use_item
+  alias chemist_sys_use_item use_item
   def use_item
     item = @subject.current_action.item
     is_item = item.is_a?(RPG::Item)
+
+    # Phase 3: CACHE ACTIVE MIX STATES BEFORE EXECUTION
+    if is_item
+      @subject.chemist_mix_cache = {
+        herbal: @subject.state?(ChemistConfig::MIX_STATES[:herbal]),
+        diluent: @subject.state?(ChemistConfig::MIX_STATES[:diluent]),
+        gunpowder: @subject.state?(ChemistConfig::MIX_STATES[:gunpowder]),
+        echinacea: @subject.state?(ChemistConfig::MIX_STATES[:echinacea]),
+        mercury: @subject.state?(ChemistConfig::MIX_STATES[:mercury])
+      }
+    end
+
+    # Phase 2: Pre-execution application (Cooking Oil user state, Fertilizer)
+    if is_item
+      if item.id == ChemistConfig::COOKING_OIL_ITEM_ID
+        @subject.add_state(ChemistConfig::OILY_STATE_ID)
+      elsif item.id == ChemistConfig::FERTILIZER_ITEM_ID
+        if $Seeds_growing && !$Seeds_growing.empty?
+          $Seeds_growing.each { |seed| seed.grow() }
+        end
+      end
+    end
+
+    # Run the engine's normal item execution
+    chemist_sys_use_item
     
-    chemist_phase3_use_item # Runs Phase 2 and executes the item
-    
+    # Phase 3: Post-execution cleanup
     if is_item
       # Adjust the Oily state Phase 2 applied to the user if necessary
       if item.id == ChemistConfig::COOKING_OIL_ITEM_ID && @subject.state?(ChemistConfig::OILY_STATE_ID)
         rep = ChemistConfig::STATE_REPLACEMENTS[ChemistConfig::OILY_STATE_ID]
         new_state = nil
-        if @subject.state?(ChemistConfig::MIX_STATES[:herbal])
+        if @subject.chemist_mix_cache[:herbal]
           new_state = rep[:herbal]
-        elsif @subject.state?(ChemistConfig::MIX_STATES[:gunpowder])
+        elsif @subject.chemist_mix_cache[:gunpowder]
           new_state = rep[:gunpowder]
-        elsif @subject.state?(ChemistConfig::MIX_STATES[:diluent])
+        elsif @subject.chemist_mix_cache[:diluent]
           new_state = rep[:diluent]
         end
         
@@ -343,12 +294,15 @@ class Scene_Battle < Scene_Base
         end
       end
       
-      # Now wipe all Mix states (False alchemy is wiped in consume_item)
+      # Wipe all Mix states (False alchemy is wiped during consume_item)
       ChemistConfig::MIX_STATES.each do |key, state_id|
         if key != :false_alchemy 
           @subject.remove_state(state_id)
         end
       end
+      
+      # Clear the cache
+      @subject.chemist_mix_cache = nil
     end
   end
 end
