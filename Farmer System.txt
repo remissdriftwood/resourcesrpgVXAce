@@ -101,16 +101,30 @@ class Game_Actor < Game_Battler
 end
 
 #===============================================================================
-# ** Game_Event - Auto-hiding Wild Seeds
+# ** Game_Party
+# Helper method to easily check for a Farmer in the active party
+#===============================================================================
+class Game_Party < Game_Unit
+  def has_farmer?
+    battle_members.any? { |actor| FarmerConfig::FARMER_CLASS_IDS.include?(actor.class_id) }
+  end
+end
+
+#===============================================================================
+# ** Game_Event - Auto-hiding Seeds
 #===============================================================================
 class Game_Event < Game_Character
   alias farmer_seed_conditions_met? conditions_met?
   def conditions_met?(page)
     return false unless farmer_seed_conditions_met?(page)
     
-    # Check if the Event's Name matches "Wild Seed [ID]" (e.g., "Wild Seed 17")
-    if @event.name =~ /wild seed\s+(\d+)/i
+    # Check if the Event's Name matches "Seed [ID]" (e.g., "Seed 17")
+    if @event.name =~ /seed\s+(\d+)/i
       item_id = $1.to_i
+      
+      # Hide the event if there is no Farmer in the party
+      return false unless $game_party.has_farmer?
+      
       # Hide the event automatically if the party already owns the seed
       return false if $game_party.has_item?($data_items[item_id])
     end
@@ -123,7 +137,7 @@ end
 # ** Game_Interpreter - Field Event Interaction
 #===============================================================================
 class Game_Interpreter
-  def interact_wild_seed(item_id)
+  def interact_seed(item_id)
     item = $data_items[item_id]
     if item && !$game_party.has_item?(item)
       $game_party.gain_item(item, 1)
