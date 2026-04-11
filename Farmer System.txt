@@ -10,6 +10,9 @@
 module FarmerConfig
   FARMER_CLASS_IDS = [4] # CHANGE THIS to your actual Farmer Class ID
   
+  # The maximum number of seeds a single Farmer can have planted at one time
+  MAX_SEEDS_PER_FARMER = 3
+  
   # Maps Item IDs to their corresponding Plant Skill IDs
   SEED_ITEMS = {
     17 => 64,  # Brandywine
@@ -29,11 +32,38 @@ module FarmerConfig
     31 => 92   # Slimes
   }
 end
-
 #===============================================================================
 # ** Global variable with an array containg all currently growing/grown seed objects
 #===============================================================================
 $Seeds_growing = []
+
+#===============================================================================
+# ** DataManager
+# Ensuring the seeds array is saved and loaded properly
+#===============================================================================
+module DataManager
+  class << self
+    alias farmer_sys_create_game_objects create_game_objects
+    alias farmer_sys_make_save_contents make_save_contents
+    alias farmer_sys_extract_save_contents extract_save_contents
+  end
+
+  def self.create_game_objects
+    farmer_sys_create_game_objects
+    $Seeds_growing = []
+  end
+
+  def self.make_save_contents
+    contents = farmer_sys_make_save_contents
+    contents[:farmer_seeds] = $Seeds_growing
+    contents
+  end
+
+  def self.extract_save_contents(contents)
+    farmer_sys_extract_save_contents(contents)
+    $Seeds_growing = contents[:farmer_seeds] || []
+  end
+end
 
 #===============================================================================
 # ** Seed class
@@ -51,6 +81,18 @@ class Seed
     @growing = 3
     
     $game_switches[3] = true
+    
+    # --- NEW: Maximum Seed Limit Logic ---
+    # Find all seeds currently planted by this specific Farmer
+    my_seeds = $Seeds_growing.select { |s| s.planter_id == @planter_id }
+    
+    # If they are at or over the limit, remove the oldest one
+    if my_seeds.size >= FarmerConfig::MAX_SEEDS_PER_FARMER
+      oldest_seed = my_seeds.first
+      $Seeds_growing.delete(oldest_seed)
+    end
+    
+    # Push the newly planted seed to the array
     $Seeds_growing.push(self)
   end
   
