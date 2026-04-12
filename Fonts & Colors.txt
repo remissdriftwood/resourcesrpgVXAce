@@ -33,3 +33,26 @@ end
     
     
     #return Color.new(255, 255, 255, 255)
+    
+#==============================================================================
+# Custom Title Text Color Only
+#==============================================================================
+
+class Scene_Title < Scene_Base
+  
+  # Force the Game Title text to be text_color(29)
+  alias custom_color_title_draw draw_game_title
+  def draw_game_title
+    # Create a temporary window to fetch the exact color from your windowskin
+    dummy_window = Window_Base.new(0, 0, 0, 0)
+    color_29 = dummy_window.text_color(29)
+    dummy_window.dispose
+    
+    # Apply color 29 to the title font
+    @foreground_sprite.bitmap.font.color = color_29
+    
+    # Draw the title
+    custom_color_title_draw
+  end
+  
+end
