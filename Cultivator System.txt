@@ -7,10 +7,22 @@
 #===============================================================================
 module CultivatorConfig
   CULTIVATOR_CLASS_IDS = [6] 
-  BASE_MP_RESTORE = 5
+  BASE_MP_RESTORE = 7
+  EARTH_CALL_MP_RESTORE = 10
   
   ELIXIR_TYPES = {
-    :pill => 1.0, :root => 1.5, :spot => 2.0
+    :pill => 1.0, :peach => 1.5, :spot => 2.0
+  }
+  
+  # --- EXHAUSTED ELIXIR SPRITES ---
+  # Define what the event looks like while on cooldown.
+  # If name is "", it will be completely invisible.
+  # index: The index on the character sheet (0-7).
+  # direction: The direction it faces (2=Down, 4=Left, 6=Right, 8=Up).
+  EMPTY_SPRITES = {
+    :pill  => { name: "", index: 0, tile_id: 200 },
+    :peach => { name: "", index: 0, tile_id: 201 }, 
+    :spot  => { name: "", index: 0, tile_id: 202}  
   }
   
   ELEMENT_NAMES = {
@@ -649,10 +661,8 @@ class Game_Actor < Game_Battler
     new_element = elements[rand(elements.size)]
     self.cultivator_element = new_element
     
-    # 2. Calculate the MP restore using the :pill multiplier
-    base = CultivatorConfig::BASE_MP_RESTORE
-    multiplier = CultivatorConfig::ELIXIR_TYPES[:pill] || 1.0
-    mp_amount = (base * multiplier).to_i
+    # 2. Use the new flat MP restore amount
+    mp_amount = CultivatorConfig::EARTH_CALL_MP_RESTORE
     
     # 3. Apply the MP and trigger the 1-battle cooldown
     self.mp += mp_amount
@@ -1119,6 +1129,94 @@ class Game_Battler < Game_BattlerBase
     
     # If no element is imbued, return the normal rate
     base_rate
+  end
+  
+end
+
+# ------------------------------------------------------------------------------
+# Cultivator System - Exhausted Elixir Graphics
+# ------------------------------------------------------------------------------
+
+#===============================================================================
+# ** Game_Event
+# Dynamically forces the event graphic to change if the elixir is consumed
+#===============================================================================
+class Game_Event < Game_Character
+  
+  #-----------------------------------------------------------------------------
+  # * NEW: Force the engine to use a specific Tileset graphic (or drop it)
+  #-----------------------------------------------------------------------------
+  alias cultivator_empty_tile_id tile_id
+  def tile_id
+    if @event.name =~ /elixir/i
+      elixir_id = "#{@map_id}_#{@id}"
+      elixir = $Game_Elixirs[elixir_id]
+      if elixir && !elixir.ready?
+        empty_data = CultivatorConfig::EMPTY_SPRITES[elixir.type]
+        # If a tile_id is specified in the config, use it!
+        if empty_data && empty_data.has_key?(:tile_id)
+          return empty_data[:tile_id]
+        else
+          return 0 # 0 tells the engine to stop rendering a tile and use a character sprite
+        end
+      end
+    end
+    cultivator_empty_tile_id
+  end
+
+  #-----------------------------------------------------------------------------
+  # * Original Character Graphic Overrides
+  #-----------------------------------------------------------------------------
+  alias cultivator_empty_character_name character_name
+  def character_name
+    if @event.name =~ /elixir/i
+      elixir_id = "#{@map_id}_#{@id}"
+      elixir = $Game_Elixirs[elixir_id]
+      if elixir && !elixir.ready?
+        empty_data = CultivatorConfig::EMPTY_SPRITES[elixir.type]
+        return empty_data[:name] if empty_data && empty_data.has_key?(:name)
+      end
+    end
+    cultivator_empty_character_name
+  end
+
+  alias cultivator_empty_character_index character_index
+  def character_index
+    if @event.name =~ /elixir/i
+      elixir_id = "#{@map_id}_#{@id}"
+      elixir = $Game_Elixirs[elixir_id]
+      if elixir && !elixir.ready?
+        empty_data = CultivatorConfig::EMPTY_SPRITES[elixir.type]
+        return empty_data[:index] if empty_data && empty_data.has_key?(:index)
+      end
+    end
+    cultivator_empty_character_index
+  end
+
+  alias cultivator_empty_direction direction
+  def direction
+    if @event.name =~ /elixir/i
+      elixir_id = "#{@map_id}_#{@id}"
+      elixir = $Game_Elixirs[elixir_id]
+      if elixir && !elixir.ready?
+        empty_data = CultivatorConfig::EMPTY_SPRITES[elixir.type]
+        return empty_data[:direction] if empty_data && empty_data.has_key?(:direction)
+      end
+    end
+    cultivator_empty_direction
+  end
+  
+  alias cultivator_empty_pattern pattern
+  def pattern
+    if @event.name =~ /elixir/i
+      elixir_id = "#{@map_id}_#{@id}"
+      elixir = $Game_Elixirs[elixir_id]
+      if elixir && !elixir.ready?
+        empty_data = CultivatorConfig::EMPTY_SPRITES[elixir.type]
+        return empty_data[:pattern] if empty_data && empty_data.has_key?(:pattern)
+      end
+    end
+    cultivator_empty_pattern
   end
   
 end
