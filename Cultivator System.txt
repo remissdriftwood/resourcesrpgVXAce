@@ -86,10 +86,11 @@ module CultivatorConfig
   # --- ENERGY SWORDS ---
   ENERGY_SWORDS_STATE_ID = 61
   ENERGY_SWORD_ANIM_ID = 11
+  ENERGY_SWORD_FOLLOWUP_SKILL_ID = 144
   
   # --- YUANYING ---
   YUANYING_STATE_ID = 62
-  YUANYING_ANIM_ID = 41 # Animation to play when the real Cultivator steps in (e.g., healing/revive anim)
+  YUANYING_ANIM_ID = 41
   
   # --- CALM MIND ---
   CALM_MIND_STATE_ID = 64
@@ -879,6 +880,13 @@ class Scene_Battle < Scene_Base
     if user.is_a?(Game_Actor) && user.state?(CultivatorConfig::ENERGY_SWORDS_STATE_ID)
       if !user.energy_sword_in_progress && target.result.hit? && [1, 2, 5, 6].include?(item.damage.type)
         
+        # NEW: If the initial target was killed, find a new random target!
+        if target.dead?
+          target = $game_troop.alive_members.sample
+          # If no enemies are left alive, abort the follow-up completely
+          return unless target
+        end
+        
         # Turn ON safety flag
         user.energy_sword_in_progress = true
         
@@ -886,9 +894,9 @@ class Scene_Battle < Scene_Base
         @log_window.wait
         show_animation([target], CultivatorConfig::ENERGY_SWORD_ANIM_ID)
         
-        # Create a basic attack action for the energy sword
+        # Create an action using your custom database skill 
         action = Game_Action.new(user)
-        action.set_attack
+        action.set_skill(CultivatorConfig::ENERGY_SWORD_FOLLOWUP_SKILL_ID) 
         
         # Apply to target (This natively triggers your elements!)
         target.item_apply(user, action.item)
