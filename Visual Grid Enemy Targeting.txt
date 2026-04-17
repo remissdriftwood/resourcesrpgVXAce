@@ -1,0 +1,324 @@
+#==============================================================================
+# Visual Grid Enemy Targeting
+#==============================================================================
+
+module VisualTargeting
+  # Cursor settings matching YEA - Menu Cursor style
+  CURSOR_FILENAME = "MenuCursor"
+  BUFFER_X = -4
+  BUFFER_Y = 16
+  
+  # Windowskin color index for the enemy name
+  NAME_COLOR_INDEX = 29
+end
+
+#==============================================================================
+# Game_Enemy
+#==============================================================================
+class Game_Enemy < Game_Battler
+  attr_accessor :grid_x
+  attr_accessor :grid_y
+  attr_accessor :grid_w
+  attr_accessor :grid_h
+end
+
+#==============================================================================
+# Game_Troop
+#==============================================================================
+class Game_Troop < Game_Unit
+  # Overwriting arrange_enemy_grid to easily capture the x, y coordinates
+  def arrange_enemy_grid
+    grid = Array.new(2) { Array.new(4, false) }
+    
+    active_enemies = @enemies.reject {|e| e.hidden? }
+    solitary_l_boss = (active_enemies.size == 1 && active_enemies[0].enemy.grid_size == [2, 2])
+    
+    sorted_to_place = active_enemies.sort_by.with_index do |e, index|
+      w, h = e.enemy.grid_size
+      [-(w * h), index]
+    end
+    
+    sorted_to_place.each do |enemy|
+      w, h = enemy.enemy.grid_size
+      placed = false
+      
+      # Set dimensions on the enemy for targeting reference
+      enemy.grid_w = w
+      enemy.grid_h = h
+      
+      if solitary_l_boss
+        x, y = 1, 0
+        enemy.grid_x, enemy.grid_y = x, y # Save coords
+        target_x = EnemyGrid::GRID_START_X + (x * EnemyGrid::CELL_WIDTH) + (w * EnemyGrid::CELL_WIDTH / 2.0)
+        target_y = EnemyGrid::GRID_START_Y + (y * EnemyGrid::CELL_HEIGHT) + (h * EnemyGrid::CELL_HEIGHT)
+        
+        enemy.screen_x = target_x.round
+        enemy.screen_y = target_y.round
+        next 
+      end
+      
+      for y in 0...(2 - h + 1)
+        for x in 0...(4 - w + 1)
+          free = true
+          for dy in 0...h
+            for dx in 0...w
+              free = false if grid[y + dy][x + dx]
+            end
+          end
+          
+          if free
+            for dy in 0...h
+              for dx in 0...w
+                grid[y + dy][x + dx] = true
+              end
+            end
+            
+            enemy.grid_x, enemy.grid_y = x, y # Save coords
+            target_x = EnemyGrid::GRID_START_X + (x * EnemyGrid::CELL_WIDTH) + (w * EnemyGrid::CELL_WIDTH / 2.0)
+            target_y = EnemyGrid::GRID_START_Y + (y * EnemyGrid::CELL_HEIGHT) + (h * EnemyGrid::CELL_HEIGHT)
+            
+            enemy.screen_x = target_x.round
+            enemy.screen_y = target_y.round
+            placed = true
+            break 
+          end
+        end
+        break if placed 
+      end
+      
+      unless placed
+        p "EnemyGrid Warning: Could not fit #{enemy.original_name} into the grid. Hiding sprite."
+        enemy.hide
+      end
+    end
+  end
+end
+
+#==============================================================================
+# Sprite_GridTargetCursor
+#==============================================================================
+class Sprite_GridTargetCursor < Sprite_Base
+  def initialize(viewport)
+    super(viewport)
+    self.bitmap = Cache.system(VisualTargeting::CURSOR_FILENAME)
+    self.z = 200
+    self.visible = false
+    @target_enemy = nil
+  end
+
+  def set_target(enemy)
+    @target_enemy = enemy
+    update_position if @target_enemy
+  end
+
+  def update
+    super
+    update_position if self.visible && @target_enemy
+  end
+
+  def update_position
+    # Screen_x is horizontal center, screen_y is bottom. Reverse the math to find top-left.
+    left_x = @target_enemy.screen_x - (EnemyGrid::CELL_WIDTH * @target_enemy.grid_w / 2.0)
+    top_y = @target_enemy.screen_y - (EnemyGrid::CELL_HEIGHT * @target_enemy.grid_h)
+    
+    self.x = left_x + VisualTargeting::BUFFER_X
+    self.y = top_y + VisualTargeting::BUFFER_Y
+  end
+end
+
+#==============================================================================
+# Window_TargetEnemyName
+#==============================================================================
+class Window_TargetEnemyName < Window_Base
+  def initialize
+    super(0, 0, Graphics.width, fitting_height(1))
+    self.z = 200
+    self.openness = 0
+  end
+
+  def set_enemy(enemy)
+    contents.clear
+    return unless enemy
+    
+    # Pulls the exact color from your windowskin using the configured index
+    change_color(text_color(VisualTargeting::NAME_COLOR_INDEX))
+    
+    draw_text(0, 0, contents.width, line_height, enemy.name, 1) # 1 = centered
+  end
+end
+
+#==============================================================================
+# Window_BattleEnemy
+#==============================================================================
+class Window_BattleEnemy < Window_Selectable
+  attr_accessor :cursor_sprite
+  attr_accessor :name_window
+
+  alias visual_target_initialize initialize
+  def initialize(info_viewport)
+    visual_target_initialize(info_viewport)
+    self.x = Graphics.width # Move offscreen
+    self.visible = false
+    self.opacity = 0
+    @last_targeted_index = 0
+  end
+
+  def aoe?
+    return false unless SceneManager.scene.is_a?(Scene_Battle)
+    action = BattleManager.actor.current_action
+    return action.item.for_all? if action && action.item
+    false
+  end
+
+  def show
+    @last_targeted_index = 0 unless enemy_valid?(@last_targeted_index)
+    select(@last_targeted_index)
+    
+    if aoe?
+      @cursor_sprite.visible = false if @cursor_sprite
+      @name_window.close if @name_window
+      process_ok
+    else
+      @cursor_sprite.visible = true if @cursor_sprite
+      @name_window.open if @name_window
+      update_custom_ui
+    end
+    super
+    self.visible = false # Keep default window hidden
+    self
+  end
+
+  def hide
+    @cursor_sprite.visible = false if @cursor_sprite
+    @name_window.close if @name_window
+    super
+  end
+
+  def select(index)
+    super(index)
+    @last_targeted_index = index if index >= 0
+    update_custom_ui
+  end
+
+  def update_custom_ui
+    return unless @cursor_sprite && @name_window
+    enemy = enemy_valid?(index) ? $game_troop.alive_members[index] : nil
+    if enemy
+      @cursor_sprite.set_target(enemy)
+      @name_window.set_enemy(enemy)
+    end
+  end
+
+  def enemy_valid?(idx)
+    idx >= 0 && idx < $game_troop.alive_members.size
+  end
+
+  def current_enemy
+    $game_troop.alive_members[index]
+  end
+
+  def get_enemies_in_column(col_x)
+    $game_troop.alive_members.select { |e| col_x >= e.grid_x && col_x < (e.grid_x + e.grid_w) }
+  end
+
+  def process_dir_up_down(dir_y)
+    Sound.play_cursor
+    ce = current_enemy
+    return unless ce
+    
+    col_enemies = get_enemies_in_column(ce.grid_x)
+    col_enemies.delete(ce)
+    
+    if col_enemies.size > 0
+      new_target = col_enemies.first
+      new_idx = $game_troop.alive_members.index(new_target)
+      select(new_idx)
+    end
+  end
+
+  def cursor_up(wrap = false)
+    process_dir_up_down(-1)
+  end
+
+  def cursor_down(wrap = false)
+    process_dir_up_down(1)
+  end
+
+  def process_dir_left_right(dir_x)
+    Sound.play_cursor
+    ce = current_enemy
+    return unless ce
+
+    current_x = ce.grid_x
+    current_y = ce.grid_y
+
+    (1..3).each do |offset|
+      check_x = (current_x + (offset * dir_x)) % 4
+      col_enemies = get_enemies_in_column(check_x)
+      
+      next if col_enemies.empty?
+
+      new_target = nil
+      if col_enemies.size == 1
+        new_target = col_enemies.first
+      else
+        new_target = col_enemies.find { |e| e.grid_y == current_y } || col_enemies.first
+      end
+
+      new_idx = $game_troop.alive_members.index(new_target)
+      select(new_idx)
+      break
+    end
+  end
+
+  def cursor_right(wrap = false)
+    process_dir_left_right(1)
+  end
+
+  def cursor_left(wrap = false)
+    process_dir_left_right(-1)
+  end
+end
+
+#==============================================================================
+# Scene_Battle
+#==============================================================================
+class Scene_Battle < Scene_Base
+  alias visual_target_create_enemy_window create_enemy_window
+  def create_enemy_window
+    visual_target_create_enemy_window
+    
+    @enemy_target_cursor = Sprite_GridTargetCursor.new(@viewport)
+    @enemy_name_window = Window_TargetEnemyName.new
+    
+    @enemy_window.cursor_sprite = @enemy_target_cursor
+    @enemy_window.name_window = @enemy_name_window
+  end
+
+  alias visual_target_dispose_spriteset dispose_spriteset
+  def dispose_spriteset
+    visual_target_dispose_spriteset
+    @enemy_target_cursor.dispose if @enemy_target_cursor
+    @enemy_name_window.dispose if @enemy_name_window
+  end
+
+  # Force skill and item windows to hide when targeting starts
+  alias visual_target_select_enemy_selection select_enemy_selection
+  def select_enemy_selection
+    @skill_window.hide if @skill_window
+    @item_window.hide if @item_window
+    visual_target_select_enemy_selection
+  end
+
+  # Unhide the skill/item window if the player cancels targeting
+  alias visual_target_on_enemy_cancel on_enemy_cancel
+  def on_enemy_cancel
+    visual_target_on_enemy_cancel
+    case @actor_command_window.current_symbol
+    when :skill
+      @skill_window.show if @skill_window
+    when :item
+      @item_window.show if @item_window
+    end
+  end
+end
