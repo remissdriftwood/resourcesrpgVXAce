@@ -256,6 +256,10 @@ class Window_BattleEnemy < Window_Selectable
       check_x = (current_x + (offset * dir_x)) % 4
       col_enemies = get_enemies_in_column(check_x)
       
+      # FIX: Remove the currently targeted enemy from the array.
+      # This prevents large enemies from targeting their own right/left halves!
+      col_enemies.delete(ce) 
+      
       next if col_enemies.empty?
 
       new_target = nil
