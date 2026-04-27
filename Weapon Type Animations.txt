@@ -1,0 +1,46 @@
+#==============================================================================
+# ** Weapon Type Animations
+#------------------------------------------------------------------------------
+# Changes the normal attack animation based on the Weapon Type ID.
+# Defaults to a specific animation when unarmed.
+#==============================================================================
+
+module WeaponAnimConfig
+  # Mapping: Weapon Type ID => Animation ID
+  TYPE_ANIMATIONS = {
+    1 => 111, # Dagger
+    2 => 111, # Sword
+    3 => 111, # 2H Sword
+    4 => 112, # Fart
+    5 => 112, # Staff
+    6 => 112, # Hammer
+    7 => 111, # Tool
+    8 => 113, # Gun
+  }
+  
+  # Animation used when the actor has no weapon equipped
+  UNARMED_ANIM = 112 
+end
+
+class Game_Actor < Game_Battler
+  #--------------------------------------------------------------------------
+  # * Overwrite: Get Normal Attack Animation ID
+  #--------------------------------------------------------------------------
+  def atk_animation_id1
+    if weapons[0]
+      return WeaponAnimConfig::TYPE_ANIMATIONS[weapons[0].wtype_id] || weapons[0].animation_id
+    else
+      return WeaponAnimConfig::UNARMED_ANIM
+    end
+  end
+  #--------------------------------------------------------------------------
+  # * Overwrite: Get Normal Attack Animation ID (Dual Wield Weapon 2)
+  #--------------------------------------------------------------------------
+  def atk_animation_id2
+    if weapons[1]
+      return WeaponAnimConfig::TYPE_ANIMATIONS[weapons[1].wtype_id] || weapons[1].animation_id
+    else
+      return 0
+    end
+  end
+end

@@ -7,6 +7,7 @@
 # - Supports mixing guns, melee weapons, or unarmed attacks.
 # - Applies a configurable damage modifier to balance dual-wielding.
 # - Restores MP per successful hit for configured Fighter classes.
+# - Recognizes custom skills tagged with <use weapon anim>
 #==============================================================================
 
 $imported = {} if $imported.nil?
@@ -27,7 +28,7 @@ module FighterAmmoConfig
 end
 
 #==============================================================================
-# ** RPG::Weapon
+# ** RPG::Weapon & RPG::Skill
 #==============================================================================
 class RPG::Weapon < RPG::EquipItem
   def is_gun?
@@ -42,6 +43,13 @@ class RPG::Weapon < RPG::EquipItem
   def shots
     return @shots if @shots
     @shots = note =~ /<shots:\s*(\d+)>/i ? $1.to_i : 1
+  end
+end
+
+class RPG::Skill < RPG::UsableItem
+  def is_weapon_attack?
+    return @is_weapon_attack if @is_weapon_attack != nil
+    @is_weapon_attack = (self.note =~ /<use weapon anim>/i) ? true : false
   end
 end
 
@@ -93,8 +101,8 @@ class Scene_Battle < Scene_Base
   def use_item
     item = @subject.current_action.item
     
-    # Check if the user is an Actor using their Attack Skill
-    if @subject.is_a?(Game_Actor) && item.id == @subject.attack_skill_id
+    # Check if user is an Actor using the base attack OR a tagged weapon skill
+    if @subject.is_a?(Game_Actor) && (item.id == @subject.attack_skill_id || item.is_weapon_attack?)
       @log_window.display_use_item(@subject, item)
       @subject.use_item(item)
       refresh_status
@@ -141,10 +149,10 @@ class Scene_Battle < Scene_Base
           end
         end
       end
-      return # Bypass standard engine behavior for basic attacks
+      return # Bypass standard engine behavior for basic attacks and tagged skills
     end
     
-    # Fallback to standard behavior for Skills/Items
+    # Fallback to standard behavior for standard Skills/Items/Enemies
     dw_ammo_system_use_item
   end
 end
@@ -159,8 +167,8 @@ class Game_Battler < Game_BattlerBase
   def make_damage_value(user, item)
     dw_ammo_system_make_damage_value(user, item)
     
-    # Apply damage penalty if the user is an actor dual wielding and using basic attack
-    if user.is_a?(Game_Actor) && item.id == user.attack_skill_id
+    # Apply damage penalty if the user is an actor dual wielding and using an attack/tagged skill
+    if user.is_a?(Game_Actor) && (item.id == user.attack_skill_id || item.is_weapon_attack?)
       if user.weapons.compact.size > 1
         @result.hp_damage = (@result.hp_damage * DualWieldConfig::DAMAGE_MULTIPLIER).to_i
         @result.mp_damage = (@result.mp_damage * DualWieldConfig::DAMAGE_MULTIPLIER).to_i
@@ -173,7 +181,7 @@ class Game_Battler < Game_BattlerBase
     ammo_system_item_apply(user, item)
     
     # MP Regen: Procs every time invoke_item successfully lands a hit
-    if @result.hit? && user.is_a?(Game_Actor) && item.id == user.attack_skill_id
+    if @result.hit? && user.is_a?(Game_Actor) && (item.id == user.attack_skill_id || item.is_weapon_attack?)
       if FighterAmmoConfig::FIGHTER_CLASS_IDS.include?(user.class_id)
         user.mp += 1
       end
