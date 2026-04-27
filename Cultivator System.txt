@@ -52,11 +52,11 @@ module CultivatorConfig
 # --- NEW: ELEMENT COMBAT EFFECTS ---
   
   # WATER: Restores Party HP equal to MAT * multiplier
-  WATER_MAT_MULTI = 0.5
+  WATER_MAT_MULTI = 0.25
   WATER_ANIMATION_ID = 121 
   
   # WOOD: Restores Self HP equal to MAT * multiplier
-  WOOD_MAT_MULTI = 1.5
+  WOOD_MAT_MULTI = 1.0
   WOOD_ANIMATION_ID = 121  
   
   # FIRE: Adds (MAT * multiplier) to Critical Hit Chance.
