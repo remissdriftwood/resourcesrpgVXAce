@@ -49,28 +49,26 @@ module CultivatorConfig
     :wood  => 12
   }
   
-  # --- NEW: ELEMENT COMBAT EFFECTS ---
+# --- NEW: ELEMENT COMBAT EFFECTS ---
   
   # WATER: Restores Party HP equal to MAT * multiplier
   WATER_MAT_MULTI = 0.5
-  WATER_ANIMATION_ID = 41 # Animation played on party when healed
+  WATER_ANIMATION_ID = 121 
   
   # WOOD: Restores Self HP equal to MAT * multiplier
   WOOD_MAT_MULTI = 1.5
-  WOOD_ANIMATION_ID = 41  # Animation played on self when healed
+  WOOD_ANIMATION_ID = 121  
   
-  # FIRE: Adds (MAT * multiplier) to Critical Hit Chance. 
-  # e.g., 0.0015 multi with 100 MAT = +0.15 (15% increased flat crit chance)
+  # FIRE: Adds (MAT * multiplier) to Critical Hit Chance.
   FIRE_CRIT_MULTI = 0.0015
+  FIRE_ANIMATION_ID = 114  
   
-  # EARTH: Adds damage based on target's current HP. Max bonus applies at 100% HP.
-  # Max Bonus = (MAT * multiplier). 
-  # e.g., 0.005 multi with 100 MAT = +0.5 (50% extra damage against full HP targets)
+  # EARTH: Follow-up damage based on target's HP before the hit.
   EARTH_MAX_MULTI = 0.005
+  EARTH_ANIMATION_ID = 117 
   
   # METAL: Deals small AOE damage to all enemies on hit.
-  # Formula: (MAT / 4) - (Enemy MDF / 5)
-  METAL_ANIMATION_ID = 7 # Set this to a quick burst/slash animation!
+  METAL_ANIMATION_ID = 128
   
   # Notetag to add to any Skill/Item note box to consume the active element
   EXPEND_NOTETAG = /<expend element>/i
@@ -80,16 +78,16 @@ module CultivatorConfig
   
   # The animation that plays on the enemy when the flying sword hits them. 
   # (1 is usually the basic sword slash)
-  FLYING_SWORD_ANIM_ID = 7
+  FLYING_SWORD_ANIM_ID = 111
   
   # --- ENERGY SWORDS ---
   ENERGY_SWORDS_STATE_ID = 61
-  ENERGY_SWORD_ANIM_ID = 7
+  ENERGY_SWORD_ANIM_ID = 111
   ENERGY_SWORD_FOLLOWUP_SKILL_ID = 144
   
   # --- YUANYING ---
   YUANYING_STATE_ID = 62
-  YUANYING_ANIM_ID = 41
+  YUANYING_ANIM_ID = 122
   
   # --- CALM MIND ---
   CALM_MIND_STATE_ID = 64
@@ -499,76 +497,119 @@ class Game_Battler < Game_BattlerBase
     base_cri
   end
   
-  #-----------------------------------------------------------------------------
-  # * EARTH: Modify Damage Value
-  #-----------------------------------------------------------------------------
-  alias cultivator_make_damage_value make_damage_value
-  def make_damage_value(user, item)
-    cultivator_make_damage_value(user, item)
+end
+
+#===============================================================================
+# ** Window_BattleLog
+# Hooking into display to process Fire animation before damage text
+#===============================================================================
+class Window_BattleLog < Window_Selectable
+  
+  alias cultivator_fire_display_action_results display_action_results
+  def display_action_results(target, item)
+    scene = SceneManager.scene
+    # Get the current subject to check their element
+    user = scene.instance_variable_get(:@subject) rescue nil
     
-    if user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
-      if user.cultivator_element == :earth && @result.hp_damage > 0
-        hp_ratio = self.mhp > 0 ? (self.hp.to_f / self.mhp) : 0.0
-        max_bonus = user.mat * CultivatorConfig::EARTH_MAX_MULTI
-        applied_bonus = max_bonus * hp_ratio
+    if user && user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
+      if user.cultivator_element == :fire && target.result.hit? && [1, 2, 5, 6].include?(item.damage.type)
         
-        @result.hp_damage = (@result.hp_damage * (1.0 + applied_bonus)).to_i
+        # 1. Wait for any currently playing animations (like the skill or normal attack) to finish
+        scene.wait_for_animation if scene.respond_to?(:wait_for_animation)
+        
+        # 2. Play the Fire animation
+        scene.show_animation([target], CultivatorConfig::FIRE_ANIMATION_ID)
+        
+        # 3. Wait for the Fire animation to finish so the damage popups don't overlap with it
+        scene.wait_for_animation if scene.respond_to?(:wait_for_animation)
+        
       end
     end
+    
+    # Proceed to log the damage of the attack normally
+    cultivator_fire_display_action_results(target, item)
   end
   
-  #-----------------------------------------------------------------------------
-  # * METAL, WATER, WOOD: Apply Per-Hit Effects
-  #-----------------------------------------------------------------------------
-  alias cultivator_item_apply item_apply
-  def item_apply(user, item)
-    cultivator_item_apply(user, item)
+end
+
+#===============================================================================
+# ** Scene_Battle
+# Hooking into invoke_item to process post-damage elemental effects
+#===============================================================================
+class Scene_Battle < Scene_Base
+  
+  alias cultivator_core_elem_invoke_item invoke_item
+  def invoke_item(target, item)
+    # Let the engine process the attack, calculate damage, and log it to the window
+    cultivator_core_elem_invoke_item(target, item)
     
-    if @result.hit? && user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
-      element = user.cultivator_element
+    # Process the element follow-ups AFTER the initial hit is fully logged
+    process_cultivator_post_hit_elements(@subject, target, item)
+  end
+  
+  def process_cultivator_post_hit_elements(user, target, item)
+    return unless user.is_a?(Game_Actor) && CultivatorConfig::CULTIVATOR_CLASS_IDS.include?(user.class_id)
+    return unless target.result.hit? && [1, 2, 5, 6].include?(item.damage.type)
+    
+    element = user.cultivator_element
+    
+    case element
+    when :earth
+      # Calculate Earth follow-up damage based on HP ratio *before* the initial hit
+      hp_before_hit = target.hp + target.result.hp_damage
+      hp_ratio = target.mhp > 0 ? (hp_before_hit.to_f / target.mhp) : 0.0
+      max_bonus = user.mat * CultivatorConfig::EARTH_MAX_MULTI
       
-      # Only apply these effects if it's an offensive move doing HP/MP damage
-      if [1, 2, 5, 6].include?(item.damage.type)
+      bonus_damage = (target.result.hp_damage * (max_bonus * hp_ratio)).to_i
+      
+      if bonus_damage > 0 && target.alive?
+        show_animation([target], CultivatorConfig::EARTH_ANIMATION_ID)
+        target.hp -= bonus_damage
+        @log_window.add_text("#{target.name} takes #{bonus_damage} Earth damage!")
+        @log_window.wait
+        target.perform_collapse_effect if target.dead?
+      end
+      
+    when :water
+      heal_amount = (user.mat * CultivatorConfig::WATER_MAT_MULTI).to_i
+      if heal_amount > 0
+        targets = $game_party.battle_members.select { |m| m.alive? }
+        show_animation(targets, CultivatorConfig::WATER_ANIMATION_ID)
         
-        # METAL - AOE Splash Damage
-        if element == :metal
-          $game_troop.alive_members.each do |target_enemy|
-            # Calculate formula and ensure damage never goes below 0
-            damage = (user.mat / 4) - (target_enemy.mdf / 5)
-            damage = [damage.to_i, 0].max
-            
-            if damage > 0
-              # Subtract HP silently and play the burst animation
-              target_enemy.hp -= damage
-              if CultivatorConfig.const_defined?(:METAL_ANIMATION_ID) && CultivatorConfig::METAL_ANIMATION_ID > 0
-                target_enemy.animation_id = CultivatorConfig::METAL_ANIMATION_ID 
-              end
-              
-              # If the splash damage drops their HP to 0, force them to collapse
-              target_enemy.perform_collapse_effect if target_enemy.dead?
-            end
-          end
+        targets.each do |actor|
+          actor.hp += heal_amount
+          @log_window.add_text("#{actor.name} restores #{heal_amount} HP!")
+          @log_window.wait
+        end
+      end
+      
+    when :wood
+      heal_amount = (user.mat * CultivatorConfig::WOOD_MAT_MULTI).to_i
+      if heal_amount > 0 && user.alive?
+        show_animation([user], CultivatorConfig::WOOD_ANIMATION_ID)
+        user.hp += heal_amount
+        @log_window.add_text("#{user.name} restores #{heal_amount} HP!")
+        @log_window.wait
+      end
+      
+    when :metal
+      targets = $game_troop.alive_members
+      if targets.any?
+        show_animation(targets, CultivatorConfig::METAL_ANIMATION_ID)
+        
+        targets.each do |target_enemy|
+          damage = (user.mat / 4) - (target_enemy.mdf / 5)
+          damage = [damage.to_i, 0].max
           
-        # WOOD - Self Heal
-        elsif element == :wood
-          heal_amount = (user.mat * CultivatorConfig::WOOD_MAT_MULTI).to_i
-          if heal_amount > 0 && user.alive?
-            user.hp += heal_amount
-            user.animation_id = CultivatorConfig::WOOD_ANIMATION_ID if CultivatorConfig::WOOD_ANIMATION_ID > 0
-          end
-          
-        # WATER - Party Heal
-        elsif element == :water
-          heal_amount = (user.mat * CultivatorConfig::WATER_MAT_MULTI).to_i
-          if heal_amount > 0
-            $game_party.battle_members.select { |m| m.alive? }.each do |target|
-              target.hp += heal_amount
-              target.animation_id = CultivatorConfig::WATER_ANIMATION_ID if CultivatorConfig::WATER_ANIMATION_ID > 0
-            end
+          if damage > 0
+            target_enemy.hp -= damage
+            @log_window.add_text("#{target_enemy.name} takes #{damage} Metal splash damage!")
+            @log_window.wait
+            target_enemy.perform_collapse_effect if target_enemy.dead?
           end
         end
-        
       end
+      
     end
   end
   
@@ -807,17 +848,15 @@ class Scene_Battle < Scene_Base
   
   #-----------------------------------------------------------------------------
   # * Alias: Turn End
-  #   This runs after all battlers have taken their normal actions for the round
   #-----------------------------------------------------------------------------
   alias cultivator_sword_turn_end turn_end
   def turn_end
-    # Run the flying sword logic before standard turn-end effects (like poison)
     process_flying_swords 
     cultivator_sword_turn_end
   end
   
   #-----------------------------------------------------------------------------
-  # * Process Flying Swords (UPDATED for Energy Swords)
+  # * Process Flying Swords 
   #-----------------------------------------------------------------------------
   def process_flying_swords
     $game_party.battle_members.each do |actor|
@@ -829,18 +868,23 @@ class Scene_Battle < Scene_Base
         @log_window.add_text("strikes #{target.name}!")
         @log_window.wait
         
+        wait_for_animation
         show_animation([target], CultivatorConfig::FLYING_SWORD_ANIM_ID)
+        wait_for_animation
         
         action = Game_Action.new(actor)
         action.set_attack
+        
+        @subject = actor 
         
         target.item_apply(actor, action.item)
         target.perform_damage_effect
         @log_window.display_action_results(target, action.item)
         @log_window.wait
         
-        # NEW: Check if Energy Swords should follow up the flying sword!
         check_and_fire_energy_swords(actor, target, action.item)
+        
+        @subject = nil
       end
     end
   end
@@ -884,37 +928,38 @@ class Scene_Battle < Scene_Base
   # * Check and Fire Energy Swords
   #-----------------------------------------------------------------------------
   def check_and_fire_energy_swords(user, target, item)
-    # 1. User is an actor with State 61
-    # 2. We are not currently in an infinite loop
-    # 3. The attack actually hit and dealt HP/MP damage (doesn't trigger on healing/buffs)
     if user.is_a?(Game_Actor) && user.state?(CultivatorConfig::ENERGY_SWORDS_STATE_ID)
       if !user.energy_sword_in_progress && target.result.hit? && [1, 2, 5, 6].include?(item.damage.type)
         
-        # NEW: If the initial target was killed, find a new random target!
         if target.dead?
           target = $game_troop.alive_members.sample
-          # If no enemies are left alive, abort the follow-up completely
           return unless target
         end
         
-        # Turn ON safety flag
         user.energy_sword_in_progress = true
         
         @log_window.add_text("Energy swords follow up!")
         @log_window.wait
-        show_animation([target], CultivatorConfig::ENERGY_SWORD_ANIM_ID)
         
-        # Create an action using your custom database skill 
+        # Ensure previous animations (like Fire) are completely done
+        wait_for_animation 
+        show_animation([target], CultivatorConfig::ENERGY_SWORD_ANIM_ID)
+        # Ensure energy sword finishes before damage/fire triggers
+        wait_for_animation 
+        
         action = Game_Action.new(user)
         action.set_skill(CultivatorConfig::ENERGY_SWORD_FOLLOWUP_SKILL_ID) 
         
-        # Apply to target (This natively triggers your elements!)
+        # Temporarily set @subject so the Fire battle log check can identify the actor
+        prev_subject = @subject
+        @subject = user
+        
         target.item_apply(user, action.item)
         target.perform_damage_effect
         @log_window.display_action_results(target, action.item)
         @log_window.wait
         
-        # Turn OFF safety flag
+        @subject = prev_subject
         user.energy_sword_in_progress = false
       end
     end
