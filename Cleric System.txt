@@ -3,16 +3,7 @@
 #==============================================================================
 
 module ClericConfig
-  # Configure your animation IDs here.
-  # If you don't want an animation to play for a specific phase, set it to 0.
-  CIRCLE_ANIMATIONS = {
-    49  => { cast: 118, active: 118 }, # Circle of Tranquility
-    52  => { cast: 118, active: 118 }, # Circle of Hostility
-    58  => { cast: 118, active: 118 }, # Circle of Immortality
-    104 => { cast: 118, active: 118 }, # Circle of Attunement
-    112 => { cast: 118, active: 118 }, # Circle of Darkness
-    115 => { cast: 118, active: 118 }  # Circle of Immobility
-  }
+  # Removed custom circle animations config. All end-of-turn circles now use ID 118.
 end
 
 $Circles_active = []
@@ -33,6 +24,7 @@ class Circle
       @caster = caster
     end
     @skill_id = skill_id
+ 
     @duration = duration
     
     $Circles_active ||= []
@@ -98,26 +90,12 @@ class Scene_Battle < Scene_Base
       user.mp += mp_restore_amount
     end
     
-    # --- Auto-Cast Circle Logic & Cast Animation ---
+    # --- Auto-Cast Circle Logic ---
     if item.is_a?(RPG::Skill)
-      if ClericConfig::CIRCLE_ANIMATIONS.has_key?(item.id)
-        
-        # 1. Force the Cast Animation
-        anim_id = ClericConfig::CIRCLE_ANIMATIONS[item.id][:cast]
-        if anim_id > 0
-          # Target an enemy sprite to ensure the screen animation has a host, fallback to user
-          anim_host = $game_troop.alive_members[0] || user
-          if anim_host
-            anim_host.animation_id = anim_id
-            wait_for_animation
-          end
-        end
-        
-        # 2. Create the Circle (ONLY Cleric ones here. Martyr circles are created in Martyr System)
-        cleric_circle_ids = [49, 52, 58, 104]
-        if cleric_circle_ids.include?(item.id)
-          Circle.new(user, item.id)
-        end
+      # Create the Circle (ONLY Cleric ones here. Martyr circles are created in Martyr System)
+      cleric_circle_ids = [49, 52, 58, 104]
+      if cleric_circle_ids.include?(item.id)
+        Circle.new(user, item.id)
       end
     end
   end
@@ -136,15 +114,14 @@ class Scene_Battle < Scene_Base
     $Circles_active.reject! { |circle| !circle.active? }
     
     $Circles_active.each do |circle|
-      # Play the Activation Animation at the End of Turn
-      if ClericConfig::CIRCLE_ANIMATIONS.has_key?(circle.skill_id)
-        anim_id = ClericConfig::CIRCLE_ANIMATIONS[circle.skill_id][:active]
-        if anim_id > 0
-          anim_host = $game_troop.alive_members[0] || circle.caster
-          if anim_host
-            anim_host.animation_id = anim_id
-            wait_for_animation 
-          end
+      cleric_circle_ids = [49, 52, 58, 104]
+      
+      # Play the Activation Animation at the End of Turn (Animation 118) for Cleric Circles
+      if cleric_circle_ids.include?(circle.skill_id)
+        anim_host = $game_troop.alive_members[0] || circle.caster
+        if anim_host
+          anim_host.animation_id = 118
+          wait_for_animation 
         end
       end
 

@@ -68,10 +68,9 @@ module CultivatorConfig
   # e.g., 0.005 multi with 100 MAT = +0.5 (50% extra damage against full HP targets)
   EARTH_MAX_MULTI = 0.005
   
-  # METAL: Applies a State on hit. MAT scales the *chance* to apply the state.
-  # e.g., 0.5 multi with 100 MAT = 50% chance to apply per hit. 200 MAT = 100%.
-  METAL_STATE_ID = 10 # Change this to your actual DEF/MDF down state ID!
-  METAL_CHANCE_MULTI = 0.5
+  # METAL: Deals small AOE damage to all enemies on hit.
+  # Formula: (MAT / 4) - (Enemy MDF / 5)
+  METAL_ANIMATION_ID = 7 # Set this to a quick burst/slash animation!
   
   # Notetag to add to any Skill/Item note box to consume the active element
   EXPEND_NOTETAG = /<expend element>/i
@@ -85,7 +84,7 @@ module CultivatorConfig
   
   # --- ENERGY SWORDS ---
   ENERGY_SWORDS_STATE_ID = 61
-  ENERGY_SWORD_ANIM_ID = 11
+  ENERGY_SWORD_ANIM_ID = 7
   ENERGY_SWORD_FOLLOWUP_SKILL_ID = 144
   
   # --- YUANYING ---
@@ -531,12 +530,23 @@ class Game_Battler < Game_BattlerBase
       # Only apply these effects if it's an offensive move doing HP/MP damage
       if [1, 2, 5, 6].include?(item.damage.type)
         
-        # METAL - Debuff
+        # METAL - AOE Splash Damage
         if element == :metal
-          apply_chance = user.mat * CultivatorConfig::METAL_CHANCE_MULTI
-          if rand(100) < apply_chance
-            self.add_state(CultivatorConfig::METAL_STATE_ID)
-            @result.added_states.push(CultivatorConfig::METAL_STATE_ID) unless @result.added_states.include?(CultivatorConfig::METAL_STATE_ID)
+          $game_troop.alive_members.each do |target_enemy|
+            # Calculate formula and ensure damage never goes below 0
+            damage = (user.mat / 4) - (target_enemy.mdf / 5)
+            damage = [damage.to_i, 0].max
+            
+            if damage > 0
+              # Subtract HP silently and play the burst animation
+              target_enemy.hp -= damage
+              if CultivatorConfig.const_defined?(:METAL_ANIMATION_ID) && CultivatorConfig::METAL_ANIMATION_ID > 0
+                target_enemy.animation_id = CultivatorConfig::METAL_ANIMATION_ID 
+              end
+              
+              # If the splash damage drops their HP to 0, force them to collapse
+              target_enemy.perform_collapse_effect if target_enemy.dead?
+            end
           end
           
         # WOOD - Self Heal

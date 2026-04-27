@@ -210,6 +210,7 @@ class Scene_Battle < Scene_Base
   # ---------------------------------------------------------------------------
   alias martyr_gout_invoke_item invoke_item
   def invoke_item(target, item)
+ 
     # When the skill is cast normally (initial cast)
     if item.is_a?(RPG::Skill) && item.id == MartyrConfig::GOUT_OF_FLAME_SKILL
       if !@subject.state?(MartyrConfig::GOUT_OF_FLAME_STATE) && target.alive?
@@ -246,7 +247,6 @@ class Scene_Battle < Scene_Base
   def resolve_frost_orbs
     $game_troop.frost_orbs ||= []
     return if $game_troop.frost_orbs.empty?
-    
     skill = $data_skills[MartyrConfig::FROST_ORB_PULSE_SKILL]
     original_subject = @subject 
     
@@ -260,7 +260,7 @@ class Scene_Battle < Scene_Base
       @log_window.add_text("The Frost Orb fires icy shards!")
       @log_window.wait
       
-      show_animation(targets, skill.animation_id)
+      # Removed the individual target database animation (show_animation)
       
       targets.each do |target|
         @subject = user
@@ -278,7 +278,6 @@ class Scene_Battle < Scene_Base
   def resolve_martyr_circles
     $Circles_active ||= []
     return if $Circles_active.empty?
-    
     original_subject = @subject 
     
     $Circles_active.each do |circle|
@@ -292,12 +291,19 @@ class Scene_Battle < Scene_Base
         opponents = user.is_a?(Game_Actor) ? $game_troop.alive_members : $game_party.alive_members
         allies = user.is_a?(Game_Actor) ? $game_party.alive_members : $game_troop.alive_members
         
+        # Play the general Animation 118 for Martyr Circles
+        anim_host = $game_troop.alive_members[0] || user
+        if anim_host
+          anim_host.animation_id = 118
+          wait_for_animation
+        end
+        
         @log_window.add_text("The Circle of Darkness pulses!")
         @log_window.wait
         
         # Hit Opponents
         unless opponents.empty?
-          show_animation(opponents, enemy_skill.animation_id)
+          # Removed specific pulse animation
           opponents.each do |target|
             @subject = user
             enemy_skill.repeats.times { invoke_item(target, enemy_skill) }
@@ -306,7 +312,7 @@ class Scene_Battle < Scene_Base
         
         # Hit Allies
         unless allies.empty?
-          show_animation(allies, ally_skill.animation_id)
+          # Removed specific pulse animation
           allies.each do |target|
             @subject = user
             ally_skill.repeats.times { invoke_item(target, ally_skill) }
@@ -320,12 +326,19 @@ class Scene_Battle < Scene_Base
         opponents = user.is_a?(Game_Actor) ? $game_troop.alive_members : $game_party.alive_members
         allies = user.is_a?(Game_Actor) ? $game_party.alive_members : $game_troop.alive_members
         
+        # Play the general Animation 118 for Martyr Circles
+        anim_host = $game_troop.alive_members[0] || user
+        if anim_host
+          anim_host.animation_id = 118
+          wait_for_animation
+        end
+
         @log_window.add_text("The Circle of Immobility pulses!")
         @log_window.wait
         
         # Hit Opponents
         unless opponents.empty?
-          show_animation(opponents, enemy_skill.animation_id)
+          # Removed specific pulse animation
           opponents.each do |target|
             @subject = user
             enemy_skill.repeats.times { invoke_item(target, enemy_skill) }
@@ -334,7 +347,7 @@ class Scene_Battle < Scene_Base
         
         # Hit Allies
         unless allies.empty?
-          show_animation(allies, ally_skill.animation_id)
+          # Removed specific pulse animation
           allies.each do |target|
             @subject = user
             ally_skill.repeats.times { invoke_item(target, ally_skill) }
@@ -369,6 +382,7 @@ class Scene_Battle < Scene_Base
     enemies.each do |battler|
       # Skip if the battler died from a previous enemy's shards
       next unless battler.alive?
+      
       if battler.state?(MartyrConfig::BETRAYING_SHARDS_STATE)
         
         skill = $data_skills[MartyrConfig::BETRAYING_SHARDS_SKILL]
