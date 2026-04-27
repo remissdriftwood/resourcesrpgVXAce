@@ -36,20 +36,16 @@ end
 #==============================================================================
 # ** Game_Troop
 #------------------------------------------------------------------------------
-# Adding containers to track active field effects for the duration of the battle.
+# Adding a container to track active Frost Orbs
 #==============================================================================
 class Game_Troop < Game_Unit
   attr_accessor :frost_orbs
-  attr_accessor :darkness_circles
-  attr_accessor :immobility_circles
 
   alias martyr_system_troop_setup setup
   def setup(troop_id)
     martyr_system_troop_setup(troop_id)
-    # Reset the active field effects for every new battle
+    # Reset the orbs for every new battle
     @frost_orbs = []
-    @darkness_circles = []
-    @immobility_circles = []
   end
 end
 
@@ -142,17 +138,19 @@ class Scene_Battle < Scene_Base
     if item.is_a?(RPG::Skill)
       if item.id == MartyrConfig::FROST_ORB_SUMMON_SKILL
         $game_troop.frost_orbs ||= []
+        # Ensure only one Frost Orb per battler
+        $game_troop.frost_orbs.reject! { |orb| orb[:user] == user }
+        
         $game_troop.frost_orbs << { user: user, turns: MartyrConfig::FROST_ORB_TURNS }
         @log_window.add_text("A Frost Orb begins hovering over the battlefield!")
         @log_window.wait
       elsif item.id == MartyrConfig::CIRCLE_DARKNESS_SUMMON_SKILL
-        $game_troop.darkness_circles ||= []
-        $game_troop.darkness_circles << { user: user, turns: MartyrConfig::CIRCLE_DARKNESS_TURNS }
+        # Passes the duration to the Cleric System's universal tracker
+        Circle.new(user, item.id, MartyrConfig::CIRCLE_DARKNESS_TURNS)
         @log_window.add_text("A Circle of Darkness engulfs the battlefield!")
         @log_window.wait
       elsif item.id == MartyrConfig::CIRCLE_IMMOBILITY_SUMMON_SKILL
-        $game_troop.immobility_circles ||= []
-        $game_troop.immobility_circles << { user: user, turns: MartyrConfig::CIRCLE_IMMOBILITY_TURNS }
+        Circle.new(user, item.id, MartyrConfig::CIRCLE_IMMOBILITY_TURNS)
         @log_window.add_text("A Circle of Immobility binds the battlefield!")
         @log_window.wait
       end
@@ -239,8 +237,7 @@ class Scene_Battle < Scene_Base
   alias martyr_system_turn_end turn_end
   def turn_end
     resolve_frost_orbs
-    resolve_darkness_circles
-    resolve_immobility_circles
+    resolve_martyr_circles
     cleanup_gout_of_flame
     resolve_martyr_turn_end_effects
     martyr_system_turn_end
@@ -255,7 +252,9 @@ class Scene_Battle < Scene_Base
     
     $game_troop.frost_orbs.each do |orb|
       user = orb[:user]
-      targets = $game_troop.alive_members
+      
+      # Determine targets dynamically based on caster's faction
+      targets = user.is_a?(Game_Actor) ? $game_troop.alive_members : $game_party.alive_members
       next if targets.empty?
       
       @log_window.add_text("The Frost Orb fires icy shards!")
@@ -276,87 +275,75 @@ class Scene_Battle < Scene_Base
     @subject = original_subject
   end
 
-  def resolve_darkness_circles
-    $game_troop.darkness_circles ||= []
-    return if $game_troop.darkness_circles.empty?
+  def resolve_martyr_circles
+    $Circles_active ||= []
+    return if $Circles_active.empty?
     
-    ally_skill = $data_skills[MartyrConfig::CIRCLE_DARKNESS_ALLY_PULSE]
-    enemy_skill = $data_skills[MartyrConfig::CIRCLE_DARKNESS_ENEMY_PULSE]
     original_subject = @subject 
     
-    $game_troop.darkness_circles.each do |circle|
-      user = circle[:user]
-      enemies = $game_troop.alive_members
-      allies = $game_party.alive_members
+    $Circles_active.each do |circle|
+      user = circle.caster
+      next unless circle.active?
       
-      @log_window.add_text("The Circle of Darkness pulses!")
-      @log_window.wait
-      
-      # Hit Enemies
-      unless enemies.empty?
-        show_animation(enemies, enemy_skill.animation_id)
-        enemies.each do |target|
-          @subject = user
-          enemy_skill.repeats.times { invoke_item(target, enemy_skill) }
+      if circle.skill_id == MartyrConfig::CIRCLE_DARKNESS_SUMMON_SKILL
+        ally_skill = $data_skills[MartyrConfig::CIRCLE_DARKNESS_ALLY_PULSE]
+        enemy_skill = $data_skills[MartyrConfig::CIRCLE_DARKNESS_ENEMY_PULSE]
+        
+        opponents = user.is_a?(Game_Actor) ? $game_troop.alive_members : $game_party.alive_members
+        allies = user.is_a?(Game_Actor) ? $game_party.alive_members : $game_troop.alive_members
+        
+        @log_window.add_text("The Circle of Darkness pulses!")
+        @log_window.wait
+        
+        # Hit Opponents
+        unless opponents.empty?
+          show_animation(opponents, enemy_skill.animation_id)
+          opponents.each do |target|
+            @subject = user
+            enemy_skill.repeats.times { invoke_item(target, enemy_skill) }
+          end
+        end
+        
+        # Hit Allies
+        unless allies.empty?
+          show_animation(allies, ally_skill.animation_id)
+          allies.each do |target|
+            @subject = user
+            ally_skill.repeats.times { invoke_item(target, ally_skill) }
+          end
+        end
+        
+      elsif circle.skill_id == MartyrConfig::CIRCLE_IMMOBILITY_SUMMON_SKILL
+        ally_skill = $data_skills[MartyrConfig::CIRCLE_IMMOBILITY_ALLY_PULSE]
+        enemy_skill = $data_skills[MartyrConfig::CIRCLE_IMMOBILITY_ENEMY_PULSE]
+        
+        opponents = user.is_a?(Game_Actor) ? $game_troop.alive_members : $game_party.alive_members
+        allies = user.is_a?(Game_Actor) ? $game_party.alive_members : $game_troop.alive_members
+        
+        @log_window.add_text("The Circle of Immobility pulses!")
+        @log_window.wait
+        
+        # Hit Opponents
+        unless opponents.empty?
+          show_animation(opponents, enemy_skill.animation_id)
+          opponents.each do |target|
+            @subject = user
+            enemy_skill.repeats.times { invoke_item(target, enemy_skill) }
+          end
+        end
+        
+        # Hit Allies
+        unless allies.empty?
+          show_animation(allies, ally_skill.animation_id)
+          allies.each do |target|
+            @subject = user
+            ally_skill.repeats.times { invoke_item(target, ally_skill) }
+          end
         end
       end
-      
-      # Hit Allies
-      unless allies.empty?
-        show_animation(allies, ally_skill.animation_id)
-        allies.each do |target|
-          @subject = user
-          ally_skill.repeats.times { invoke_item(target, ally_skill) }
-        end
-      end
-      
-      circle[:turns] -= 1
     end
     
-    $game_troop.darkness_circles.reject! { |c| c[:turns] <= 0 }
-    @log_window.wait_and_clear
-    @subject = original_subject
-  end
-
-  def resolve_immobility_circles
-    $game_troop.immobility_circles ||= []
-    return if $game_troop.immobility_circles.empty?
-    
-    ally_skill = $data_skills[MartyrConfig::CIRCLE_IMMOBILITY_ALLY_PULSE]
-    enemy_skill = $data_skills[MartyrConfig::CIRCLE_IMMOBILITY_ENEMY_PULSE]
-    original_subject = @subject 
-    
-    $game_troop.immobility_circles.each do |circle|
-      user = circle[:user]
-      enemies = $game_troop.alive_members
-      allies = $game_party.alive_members
-      
-      @log_window.add_text("The Circle of Immobility pulses!")
-      @log_window.wait
-      
-      # Hit Enemies
-      unless enemies.empty?
-        show_animation(enemies, enemy_skill.animation_id)
-        enemies.each do |target|
-          @subject = user
-          enemy_skill.repeats.times { invoke_item(target, enemy_skill) }
-        end
-      end
-      
-      # Hit Allies
-      unless allies.empty?
-        show_animation(allies, ally_skill.animation_id)
-        allies.each do |target|
-          @subject = user
-          ally_skill.repeats.times { invoke_item(target, ally_skill) }
-        end
-      end
-      
-      circle[:turns] -= 1
-    end
-    
-    $game_troop.immobility_circles.reject! { |c| c[:turns] <= 0 }
-    @log_window.wait_and_clear
+    @log_window.wait_and_clear if @log_window
     @subject = original_subject
   end
 

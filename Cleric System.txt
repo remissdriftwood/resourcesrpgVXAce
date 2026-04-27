@@ -1,9 +1,9 @@
 #==============================================================================
-# Cleric System Complete v5 (Circles, MP Restore & Animations Fix)
+# Cleric System Complete v5 (Unified Circles, MP Restore & Animations)
 #==============================================================================
 
 module ClericConfig
-  # Configure your animation IDs here. 
+  # Configure your animation IDs here.
   # If you don't want an animation to play for a specific phase, set it to 0.
   CIRCLE_ANIMATIONS = {
     49  => { cast: 118, active: 118 }, # Circle of Tranquility
@@ -23,8 +23,9 @@ $Circles_active = []
 class Circle
   attr_accessor :caster      
   attr_accessor :skill_id    
+  attr_accessor :duration
   
-  def initialize(caster, skill_id)
+  def initialize(caster, skill_id, duration = -1)
     # Safely handle both actor IDs and actual Game_Actor objects
     if caster.is_a?(Integer)
       @caster = $game_actors[caster]
@@ -32,15 +33,23 @@ class Circle
       @caster = caster
     end
     @skill_id = skill_id
+    @duration = duration
     
     $Circles_active ||= []
-    # Prevent duplicate circles of the same type from the same caster
-    $Circles_active.reject! { |c| c.caster == @caster && c.skill_id == @skill_id }
+    # One Circle Per Battler: Prevent overlapping circles from the same caster
+    $Circles_active.reject! { |c| c.caster == @caster }
     $Circles_active.push(self)
   end
   
   def active?
-    @caster && @caster.is_a?(Game_Battler) && $game_party.battle_members.include?(@caster) && !@caster.dead?
+    return false unless @caster && @caster.is_a?(Game_Battler)
+    return false if @caster.dead?
+    # Ensure it works dynamically for both Party and Troop casters
+    if @caster.is_a?(Game_Actor)
+      return $game_party.battle_members.include?(@caster)
+    else
+      return $game_troop.members.include?(@caster)
+    end
   end
 end
 
@@ -69,37 +78,46 @@ class Scene_Battle < Scene_Base
   # Hook into use_item to restore MP and automatically cast circles
   alias cleric_mp_use_item use_item
   def use_item
-    if @subject.actor?
-      @subject.healed_someone_this_action = false
+    # 1. Grab user and item BEFORE the action resolves to prevent crash bugs
+    user = @subject
+    item = user && user.current_action ? user.current_action.item : nil
+    
+    if user && user.actor?
+      user.healed_someone_this_action = false
     end
     
+    # 2. Call the original alias
     cleric_mp_use_item 
     
-    item = @subject.current_action.item
+    # 3. Safely abort if the action or user was wiped
+    return unless user && item
     
     # --- MP Restore Logic ---
-    if @subject.actor? && @subject.healed_someone_this_action
+    if user.actor? && user.healed_someone_this_action
       mp_restore_amount = $game_variables[13] > 0 ? $game_variables[13] : 1
-      @subject.mp += mp_restore_amount
+      user.mp += mp_restore_amount
     end
     
     # --- Auto-Cast Circle Logic & Cast Animation ---
-    if @subject.actor? && item.is_a?(RPG::Skill)
+    if item.is_a?(RPG::Skill)
       if ClericConfig::CIRCLE_ANIMATIONS.has_key?(item.id)
         
         # 1. Force the Cast Animation
         anim_id = ClericConfig::CIRCLE_ANIMATIONS[item.id][:cast]
         if anim_id > 0
-          # Target an enemy sprite to ensure the screen animation has a host
-          anim_host = $game_troop.alive_members[0]
+          # Target an enemy sprite to ensure the screen animation has a host, fallback to user
+          anim_host = $game_troop.alive_members[0] || user
           if anim_host
             anim_host.animation_id = anim_id
             wait_for_animation
           end
         end
         
-        # 2. Create the Circle
-        Circle.new(@subject, item.id)
+        # 2. Create the Circle (ONLY Cleric ones here. Martyr circles are created in Martyr System)
+        cleric_circle_ids = [49, 52, 58, 104]
+        if cleric_circle_ids.include?(item.id)
+          Circle.new(user, item.id)
+        end
       end
     end
   end
@@ -118,13 +136,11 @@ class Scene_Battle < Scene_Base
     $Circles_active.reject! { |circle| !circle.active? }
     
     $Circles_active.each do |circle|
-      
       # Play the Activation Animation at the End of Turn
       if ClericConfig::CIRCLE_ANIMATIONS.has_key?(circle.skill_id)
         anim_id = ClericConfig::CIRCLE_ANIMATIONS[circle.skill_id][:active]
         if anim_id > 0
-          # Target an enemy sprite to ensure the screen animation has a host
-          anim_host = $game_troop.alive_members[0]
+          anim_host = $game_troop.alive_members[0] || circle.caster
           if anim_host
             anim_host.animation_id = anim_id
             wait_for_animation 
@@ -204,15 +220,15 @@ class Scene_Battle < Scene_Base
         $game_troop.members.each { |b| b.add_state(38) unless b.dead? }
         @log_window.wait_and_clear
         
-      when 112 # Circle of Darkness
-        # RPG::SE.new("Darkness3", 80, 100).play
-        # Fill in Darkness effects
-        
-      when 115 # Circle of Immobility
-        # RPG::SE.new("Paralyze3", 80, 100).play
-        # Fill in Immobility effects
-        
+      end
+      
+      # Process duration logic uniformly for ALL circles (including Martyr ones)
+      if circle.duration > 0
+        circle.duration -= 1
       end
     end
+    
+    # Clean up circles that have naturally expired
+    $Circles_active.reject! { |circle| circle.duration == 0 }
   end
 end
