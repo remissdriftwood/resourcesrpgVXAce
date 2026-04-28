@@ -1,0 +1,8 @@
+class Game_Actor < Game_Battler
+  attr_writer :description
+  
+  def description
+    # Returns the custom description if it exists, otherwise falls back to the database default
+    @description || actor.description 
+  end
+end
