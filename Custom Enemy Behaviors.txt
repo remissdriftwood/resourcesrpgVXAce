@@ -2,37 +2,13 @@
 # ** Custom Enemy Behaviors
 #==============================================================================
 
-class Game_Action
-  alias sh_custom_evaluate_item_with_target evaluate_item_with_target
-  
-  #--------------------------------------------------------------------------
-  # * Override: Evaluate Item with Target
-  #--------------------------------------------------------------------------
-  def evaluate_item_with_target(target)
-    score = sh_custom_evaluate_item_with_target(target)
-    
-    if subject.is_a?(Game_Enemy)
-      
-      # 1. Imp (IDs 13, 14, 15) using Caduceus heart (ID 43)
-      if [13, 14, 15].include?(subject.enemy_id) && item.id == 43
-        if target.hp_rate <= 0.33
-          score += 10 
-        else
-          return 0 
-        end
-      end
-      
-      # 2. Carrion Eater (IDs 25, 26, 27) focuses player characters <= 50% HP
-      if [25, 26, 27].include?(subject.enemy_id) && target.is_a?(Game_Actor)
-        if target.hp_rate <= 0.50
-          score += 10 
-        end
-      end
-      
-    end
-    
-    return score
-  end
+module CustomEnemyConfig
+  # --- Dynamic Healers Configuration ---
+  # Add new entries here to give other enemies this precise healing logic
+  HEALERS = [
+    { skill_id: 43, enemies: [13, 14, 15], hp_threshold: 0.33 },
+    { skill_id: 31, enemies: [16, 17, 18], hp_threshold: 0.33 }
+  ]
 end
 
 class Game_Enemy < Game_Battler
@@ -49,16 +25,32 @@ class Game_Enemy < Game_Battler
     
     # --- Mimic Logic: Setup ---
     if [31, 32, 33].include?(@enemy_id)
-      # Find all valid enemies to mimic (excluding empty slots, self, and enemies with no actions)
       valid_enemies = $data_enemies.compact.select do |e| 
         e.name != "" && ![31, 32, 33].include?(e.id) && !e.actions.empty?
       end
       
       if valid_enemies.any?
-        # Store the action patterns of a random valid enemy
         @mimicked_actions = valid_enemies.sample.actions
       end
     end
+  end
+
+  #--------------------------------------------------------------------------
+  # * Override: Action Valid?
+  #--------------------------------------------------------------------------
+  alias sh_custom_action_valid action_valid?
+  def action_valid?(action)
+    return false unless sh_custom_action_valid(action)
+    
+    # --- 1. Dynamic Healer Logic ---
+    # Will only CONSIDER using the specified healing skill if an ally meets the HP threshold
+    CustomEnemyConfig::HEALERS.each do |config|
+      if config[:enemies].include?(@enemy_id) && action.skill_id == config[:skill_id]
+        return false unless $game_troop.alive_members.any? { |b| b.hp_rate <= config[:hp_threshold] }
+      end
+    end
+    
+    return true
   end
 
   #--------------------------------------------------------------------------
@@ -66,15 +58,12 @@ class Game_Enemy < Game_Battler
   #--------------------------------------------------------------------------
   alias sh_mimic_make_actions make_actions
   def make_actions
-    # --- Mimic Logic: Execution ---
     if @mimicked_actions
-      # Temporarily swap the global enemy actions with our mimicked actions
       original_actions = enemy.actions
       begin
         enemy.instance_variable_set(:@actions, @mimicked_actions)
         sh_mimic_make_actions
       ensure
-        # Use 'ensure' to guarantee we ALWAYS revert the database object so it doesn't stay permanently changed
         enemy.instance_variable_set(:@actions, original_actions)
       end
     else
@@ -92,6 +81,52 @@ class Game_Enemy < Game_Battler
   end
 end
 
+class Game_Action
+  #--------------------------------------------------------------------------
+  # * Override: Targets for Opponents
+  #--------------------------------------------------------------------------
+  alias sh_custom_targets_for_opponents targets_for_opponents
+  def targets_for_opponents
+    if subject.is_a?(Game_Enemy) 
+      
+      # --- 2. Carrion Eater (IDs 25, 26, 27) Target Selection ---
+      if [25, 26, 27].include?(subject.enemy_id) && item.for_opponent? && item.for_one?
+        low_hp_targets = opponents_unit.alive_members.select { |actor| actor.hp_rate <= 0.50 }
+        
+        if low_hp_targets.any?
+          return [low_hp_targets.sample]
+        end
+      end
+      
+    end
+    
+    sh_custom_targets_for_opponents
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Override: Targets for Friends
+  #--------------------------------------------------------------------------
+  alias sh_custom_targets_for_friends targets_for_friends
+  def targets_for_friends
+    if subject.is_a?(Game_Enemy)
+      
+      # --- 1. Dynamic Healer Target Selection ---
+      CustomEnemyConfig::HEALERS.each do |config|
+        if config[:enemies].include?(subject.enemy_id) && item.id == config[:skill_id] && item.for_one?
+          low_hp_allies = friends_unit.alive_members.select { |b| b.hp_rate <= config[:hp_threshold] }
+          if low_hp_allies.any?
+            # Ensure it targets the ally who actually needs it (lowest HP)
+            return [low_hp_allies.min_by { |b| b.hp_rate }]
+          end
+        end
+      end
+      
+    end
+    
+    sh_custom_targets_for_friends
+  end
+end
+
 class Game_Battler < Game_BattlerBase
   attr_accessor :digested_by
   
@@ -101,9 +136,6 @@ class Game_Battler < Game_BattlerBase
   alias sh_digest_item_apply item_apply
   def item_apply(user, item)
     sh_digest_item_apply(user, item)
-    
-    # 3. Digest (Skill 159 applying State 13)
-    # Notice we use 'user' to grab the enemy, and 'self' because we are currently inside the target's methods
     if item.is_a?(RPG::Skill) && item.id == 159 && self.result.added_states.include?(13)
       self.digested_by = user
     end
@@ -123,64 +155,62 @@ class Game_Battler < Game_BattlerBase
   #--------------------------------------------------------------------------
   alias sh_custom_enemy_die die
   def die
-    was_dead = dead?
+    # Cache the digest info BEFORE the original 'die' method wipes all states
     was_digested = self.state?(13)
     digester = @digested_by
     
+    # Run original death processing
     sh_custom_enemy_die
     
-    if !was_dead && dead?
+    # --- Digest Logic: Prey Dies ---
+    if was_digested && digester && digester.alive?
+      heal_amount = (digester.mhp * 0.25).to_i
+      digester.hp += heal_amount
+      if SceneManager.scene.is_a?(Scene_Battle)
+        SceneManager.scene.log_window.add_text("#{digester.name} finishes digesting its prey and recovers HP!")
+        SceneManager.scene.log_window.wait
+      end
+    end
+    
+    # --- Digest Logic: Digester Dies ---
+    if self.is_a?(Game_Enemy) && $game_party.in_battle
+      $game_party.members.each do |actor|
+        if actor.digested_by == self && actor.state?(13)
+          actor.remove_state(13) 
+        end
+      end
+    end
+    
+    # --- Carrion Eater Logic ---
+    if self.is_a?(Game_Enemy) && $game_party.in_battle
+      carrion_eaters = $game_troop.alive_members.select { |enemy| [25, 26, 27].include?(enemy.enemy_id) && enemy != self }
       
-      # --- Digest Logic: Prey Dies ---
-      if was_digested && digester && digester.alive?
-        heal_amount = (digester.mhp * 0.25).to_i
-        digester.hp += heal_amount
+      unless carrion_eaters.empty?
+        carrion_eaters.each do |carrion|
+          carrion.hp = carrion.mhp
+        end
+        
         if SceneManager.scene.is_a?(Scene_Battle)
-          SceneManager.scene.log_window.add_text("#{digester.name} finishes digesting its prey and recovers HP!")
+          SceneManager.scene.log_window.add_text("Carrion Eater devours its fallen comrade! Carrion Eater is healed to full HP!")
           SceneManager.scene.log_window.wait
         end
       end
-      
-      # --- Digest Logic: Digester Dies ---
-      if self.is_a?(Game_Enemy) && $game_party.in_battle
-        $game_party.members.each do |actor|
-          if actor.digested_by == self && actor.state?(13)
-            actor.remove_state(13) 
-          end
-        end
-      end
-      
-      # --- Carrion Eater Logic ---
-      if self.is_a?(Game_Enemy) && $game_party.in_battle
-        carrion_eaters = $game_troop.alive_members.select { |enemy| [25, 26, 27].include?(enemy.enemy_id) && enemy != self }
-        unless carrion_eaters.empty?
-          carrion_eaters.each do |carrion|
-            carrion.hp = carrion.mhp
-          end
+    end
+    
+    # --- Leaguer Logic ---
+    if $game_party.in_battle
+      leaguers = $game_troop.alive_members.select { |enemy| [28, 29, 30].include?(enemy.enemy_id) && enemy != self }
+      unless leaguers.empty?
+        leaguers.each do |leaguer|
+          leaguer.leaguer_cri_bonus ||= 0.0
+          leaguer.leaguer_cri_bonus += 0.05
           if SceneManager.scene.is_a?(Scene_Battle)
-            SceneManager.scene.log_window.add_text("Carrion Eater devours its fallen comrade! Carrion Eater is healed to full HP!")
+            SceneManager.scene.log_window.add_text("#{leaguer.name} relishes the gore of battle!")
             SceneManager.scene.log_window.wait
           end
         end
       end
-      
-      # --- Leaguer Logic ---
-      if $game_party.in_battle
-        leaguers = $game_troop.alive_members.select { |enemy| [28, 29, 30].include?(enemy.enemy_id) && enemy != self }
-        
-        unless leaguers.empty?
-          leaguers.each do |leaguer|
-            leaguer.leaguer_cri_bonus ||= 0.0
-            leaguer.leaguer_cri_bonus += 0.05
-            
-            if SceneManager.scene.is_a?(Scene_Battle)
-              SceneManager.scene.log_window.add_text("#{leaguer.name} relishes the gore of battle!")
-              SceneManager.scene.log_window.wait
-            end
-          end
-        end
-      end
-      
     end
+    
   end
 end
