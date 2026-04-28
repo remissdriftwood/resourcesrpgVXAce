@@ -1,0 +1,26 @@
+class Game_Follower < Game_Character
+  #--------------------------------------------------------------------------
+  # * Alias the existing update method
+  #--------------------------------------------------------------------------
+  alias :glide_dead_update :update
+  def update
+    glide_dead_update
+    update_dead_glide_effect
+  end
+
+  #--------------------------------------------------------------------------
+  # * New logic to handle gliding
+  #--------------------------------------------------------------------------
+  def update_dead_glide_effect
+    return unless actor # Ensure there is an actor assigned to this follower
+    
+    if actor.dead?
+      @walk_anime = false
+      @step_anime = false
+      @pattern = 1 # 0, 1, and 2 correspond to the 3 frames of the sprite sheet
+    else
+      # Restore default behavior if they are revived
+      @walk_anime = true
+    end
+  end
+end
