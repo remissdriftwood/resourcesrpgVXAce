@@ -208,4 +208,13 @@ class Scene_Battle < Scene_Base
     # Clean up circles that have naturally expired
     $Circles_active.reject! { |circle| circle.duration == 0 }
   end
+  
+  #--------------------------------------------------------------------------
+  # * End of Battle Cleanup
+  #--------------------------------------------------------------------------
+  alias cleric_circle_scene_terminate terminate
+  def terminate
+    cleric_circle_scene_terminate
+    $Circles_active.clear if $Circles_active
+  end
 end
