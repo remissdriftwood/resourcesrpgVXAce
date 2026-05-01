@@ -50,6 +50,20 @@ class Game_Troop < Game_Unit
 end
 
 #==============================================================================
+# ** Game_BattlerBase
+#==============================================================================
+class Game_BattlerBase
+  # Force Gout of Flame to be usable even if MP is below the requirement
+  alias martyr_gout_skill_cost_payable? skill_cost_payable?
+  def skill_cost_payable?(skill)
+    if state?(MartyrConfig::GOUT_OF_FLAME_STATE) && skill.is_a?(RPG::Skill) && skill.id == MartyrConfig::GOUT_OF_FLAME_SKILL
+      return true
+    end
+    martyr_gout_skill_cost_payable?(skill)
+  end
+end
+
+#==============================================================================
 # ** Game_Battler
 #==============================================================================
 class Game_Battler < Game_BattlerBase
@@ -162,10 +176,13 @@ class Scene_Battle < Scene_Base
   # ---------------------------------------------------------------------------
   alias martyr_gout_execute_action execute_action
   def execute_action
+    # Cache the item before execution in case the engine clears the action queue
+    item_cast = @subject && @subject.current_action ? @subject.current_action.item : nil
+    
     if @subject && @subject.state?(MartyrConfig::GOUT_OF_FLAME_STATE)
       
       # Only process these checks if the current action is actually Gout of Flame
-      if @subject.current_action && @subject.current_action.item && @subject.current_action.item.is_a?(RPG::Skill) && @subject.current_action.item.id == MartyrConfig::GOUT_OF_FLAME_SKILL
+      if item_cast && item_cast.is_a?(RPG::Skill) && item_cast.id == MartyrConfig::GOUT_OF_FLAME_SKILL
         
         skill = $data_skills[MartyrConfig::GOUT_OF_FLAME_SKILL]
         target = @subject.gout_target
@@ -181,17 +198,6 @@ class Scene_Battle < Scene_Base
           return # Abort this action
         end
         
-        # Check 2: Out of MP before casting
-        if @subject.mp < @subject.skill_mp_cost(skill)
-          @subject.remove_state(MartyrConfig::GOUT_OF_FLAME_STATE)
-          @subject.gout_target = nil
-          @subject.gout_multiplier = 1
-          @log_window.add_text("#{@subject.name}'s Gout of Flame ended - out of MP!")
-          @log_window.wait
-          @subject.clear_actions
-          return # Abort this action
-        end
-        
         # Passed checks! Increment multiplier for this turn's cast.
         @subject.gout_multiplier ||= 1
         @subject.gout_multiplier += MartyrConfig::GOUT_INCREMENT
@@ -202,7 +208,26 @@ class Scene_Battle < Scene_Base
       end
     end
     
+    # Let the engine process MP deduction and damage
+    # (Because of the Game_BattlerBase alias, MP will drain and clamp at 0 if they didn't have enough)
     martyr_gout_execute_action
+    
+    # Post-Cast Check: Evaluate MP after the cost was subtracted
+    if @subject && item_cast && item_cast.is_a?(RPG::Skill) && item_cast.id == MartyrConfig::GOUT_OF_FLAME_SKILL
+      # Only proceed if they still have the state (meaning the target didn't die from the attack)
+      if @subject.state?(MartyrConfig::GOUT_OF_FLAME_STATE)
+        
+        # Check if MP hit 0 or less
+        if @subject.mp <= 0
+          @subject.remove_state(MartyrConfig::GOUT_OF_FLAME_STATE)
+          @subject.gout_target = nil
+          @subject.gout_multiplier = 1
+          @log_window.add_text("#{@subject.name}'s flame guttered out!")
+          @log_window.wait
+        end
+        
+      end
+    end
   end
 
   # ---------------------------------------------------------------------------
@@ -245,8 +270,12 @@ class Scene_Battle < Scene_Base
   end
   
   def resolve_frost_orbs
+    # Abort if the battle is over
+    return if $game_troop.alive_members.empty? || $game_party.alive_members.empty?
+    
     $game_troop.frost_orbs ||= []
     return if $game_troop.frost_orbs.empty?
+
     skill = $data_skills[MartyrConfig::FROST_ORB_PULSE_SKILL]
     original_subject = @subject 
     
@@ -256,11 +285,12 @@ class Scene_Battle < Scene_Base
       # Determine targets dynamically based on caster's faction
       targets = user.is_a?(Game_Actor) ? $game_troop.alive_members : $game_party.alive_members
       next if targets.empty?
-      
+
       @log_window.add_text("The Frost Orb fires icy shards!")
       @log_window.wait
       
-      # Removed the individual target database animation (show_animation)
+      # Re-enabled the animation playback
+      show_animation(targets, skill.animation_id)
       
       targets.each do |target|
         @subject = user
@@ -276,14 +306,18 @@ class Scene_Battle < Scene_Base
   end
 
   def resolve_martyr_circles
+    # Abort if the battle is over
+    return if $game_troop.alive_members.empty? || $game_party.alive_members.empty?
+    
     $Circles_active ||= []
     return if $Circles_active.empty?
+
     original_subject = @subject 
     
     $Circles_active.each do |circle|
       user = circle.caster
       next unless circle.active?
-      
+
       if circle.skill_id == MartyrConfig::CIRCLE_DARKNESS_SUMMON_SKILL
         ally_skill = $data_skills[MartyrConfig::CIRCLE_DARKNESS_ALLY_PULSE]
         enemy_skill = $data_skills[MartyrConfig::CIRCLE_DARKNESS_ENEMY_PULSE]
@@ -303,7 +337,6 @@ class Scene_Battle < Scene_Base
         
         # Hit Opponents
         unless opponents.empty?
-          # Removed specific pulse animation
           opponents.each do |target|
             @subject = user
             enemy_skill.repeats.times { invoke_item(target, enemy_skill) }
@@ -312,7 +345,6 @@ class Scene_Battle < Scene_Base
         
         # Hit Allies
         unless allies.empty?
-          # Removed specific pulse animation
           allies.each do |target|
             @subject = user
             ally_skill.repeats.times { invoke_item(target, ally_skill) }
@@ -338,7 +370,6 @@ class Scene_Battle < Scene_Base
         
         # Hit Opponents
         unless opponents.empty?
-          # Removed specific pulse animation
           opponents.each do |target|
             @subject = user
             enemy_skill.repeats.times { invoke_item(target, enemy_skill) }
@@ -347,7 +378,6 @@ class Scene_Battle < Scene_Base
         
         # Hit Allies
         unless allies.empty?
-          # Removed specific pulse animation
           allies.each do |target|
             @subject = user
             ally_skill.repeats.times { invoke_item(target, ally_skill) }
@@ -359,7 +389,7 @@ class Scene_Battle < Scene_Base
     @log_window.wait_and_clear if @log_window
     @subject = original_subject
   end
-
+  
   def cleanup_gout_of_flame
     battlers = $game_party.alive_members + $game_troop.alive_members
     battlers.each do |battler|
@@ -376,13 +406,16 @@ class Scene_Battle < Scene_Base
   end
 
   def resolve_martyr_turn_end_effects
-    # Grab all alive enemies at the start of the end-turn phase
-    enemies = $game_troop.alive_members
+    # Abort if the battle is over
+    return if $game_troop.alive_members.empty? || $game_party.alive_members.empty?
     
-    enemies.each do |battler|
-      # Skip if the battler died from a previous enemy's shards
+    # Grab all alive battlers (both sides) at the start of the end-turn phase
+    battlers = $game_party.alive_members + $game_troop.alive_members
+    
+    battlers.each do |battler|
+      # Skip if the battler died from a previous effect
       next unless battler.alive?
-      
+
       if battler.state?(MartyrConfig::BETRAYING_SHARDS_STATE)
         
         skill = $data_skills[MartyrConfig::BETRAYING_SHARDS_SKILL]
@@ -393,8 +426,12 @@ class Scene_Battle < Scene_Base
         # Display the skill usage in the battle log
         @log_window.display_use_item(@subject, skill)
         
-        # Determine targets: The enemy's allies (other enemies), excluding themselves
-        targets = $game_troop.alive_members.reject { |ally| ally == battler }
+        # Determine targets: The battler's allies, excluding themselves
+        if battler.is_a?(Game_Actor)
+          targets = $game_party.alive_members.reject { |ally| ally == battler }
+        else
+          targets = $game_troop.alive_members.reject { |ally| ally == battler }
+        end
         
         if targets.empty?
           @log_window.add_text("...But there was no one left to betray!")
