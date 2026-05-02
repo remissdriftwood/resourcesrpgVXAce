@@ -64,7 +64,7 @@ module CultivatorConfig
   FIRE_ANIMATION_ID = 114  
   
   # EARTH: Follow-up damage based on target's HP before the hit.
-  EARTH_MAX_MULTI = 0.005
+  EARTH_MAX_MULTI = 0.05
   EARTH_ANIMATION_ID = 117 
   
   # METAL: Deals small AOE damage to all enemies on hit.
@@ -621,13 +621,13 @@ end
 #===============================================================================
 class Scene_Battle < Scene_Base
   
-  alias cultivator_eff_use_item use_item
-  def use_item
+  alias cultivator_eff_execute_action execute_action
+  def execute_action
     # Grab user and item BEFORE the action resolves
     user = @subject
     item = user && user.current_action ? user.current_action.item : nil
     
-    cultivator_eff_use_item
+    cultivator_eff_execute_action
     
     # Safely abort if the item was wiped during the action
     return unless user && item
@@ -882,6 +882,9 @@ class Scene_Battle < Scene_Base
         @log_window.display_action_results(target, action.item)
         @log_window.wait
         
+        # NEW: Process elements for Sword on a String
+        process_cultivator_post_hit_elements(actor, target, action.item)
+        
         check_and_fire_energy_swords(actor, target, action.item)
         
         @subject = nil
@@ -958,6 +961,9 @@ class Scene_Battle < Scene_Base
         target.perform_damage_effect
         @log_window.display_action_results(target, action.item)
         @log_window.wait
+        
+        # NEW: Process elements for Energy Swords
+        process_cultivator_post_hit_elements(user, target, action.item)
         
         @subject = prev_subject
         user.energy_sword_in_progress = false

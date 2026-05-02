@@ -91,12 +91,17 @@ class Scene_Battle < Scene_Base
         @log_window.display_action_results(target, item)
         @log_window.wait
         
-        # NEW: Check if Energy Swords should follow up the extra hit!
+        # NEW: Process elements for the extra hit!
+        if respond_to?(:process_cultivator_post_hit_elements)
+          process_cultivator_post_hit_elements(user, target, item)
+        end
+        
+        # 5. Check if Energy Swords should follow up the extra hit!
         if respond_to?(:check_and_fire_energy_swords)
           check_and_fire_energy_swords(user, target, item)
         end
         
-        # 5. Clear the damage multiplier flag so it doesn't affect future attacks
+        # 6. Clear the damage multiplier flag so it doesn't affect future attacks
         user.extra_hit_multiplier = nil
       end
     end
