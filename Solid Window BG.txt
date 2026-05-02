@@ -1,0 +1,40 @@
+#==============================================================================
+# Solid Window Backgrounds
+#==============================================================================
+
+class Window_Base < Window
+  # Alias the initialization to set opacity to 255 (solid) for all windows
+  alias solid_white_bg_init initialize
+  def initialize(x, y, width, height)
+    solid_white_bg_init(x, y, width, height)
+    self.back_opacity = 255
+  end
+end
+
+class Window_BattleLog < Window_Selectable
+  # Alias the initialization to force the battle log back to 0 (transparent)
+  alias transparent_battlelog_init initialize
+  def initialize
+    transparent_battlelog_init
+    self.back_opacity = 0
+  end
+end
+
+#==============================================================================
+# Menu Background Overlay Customization
+#==============================================================================
+
+class Scene_MenuBase < Scene_Base
+  alias white_overlay_create_background create_background
+  def create_background
+    white_overlay_create_background
+    
+    # This overrides the default black tint (16, 16, 16, 128).
+    # The format is color.set(Red, Green, Blue, Opacity).
+    #
+    # Opacity 255 = completely solid white (hides the map entirely)
+    # Opacity 128 = a semi-transparent white wash (blurred map is still visible)
+    
+    @background_sprite.color.set(255, 255, 255, 255)
+  end
+end
