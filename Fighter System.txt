@@ -1,23 +1,83 @@
-# ------------------------------------------------------------------------------
-# Fighter System
-# Defines the rules for how Fighters' weapon skills function.
-# ------------------------------------------------------------------------------
-#
-#===============================================================================
-# ** Blunt skill processor
-#===============================================================================
-def blunt_processor(user, targets)
-    
-  #---------------------------------------------------------------------------
-  # Blunt MP cost
-  #---------------------------------------------------------------------------
-  $game_actors[user].mp -= $game_actors[user].mmp
+#==============================================================================
+# ** Fighter System - Blunt Skills
+#------------------------------------------------------------------------------
+# Bypasses Common Events for Fighter's blunt weapon skills.
+# Reads the <blunt skill> notetag on skills to drain the user's MP to 0 
+# after execution.
+# Applies State 28 (Resting) specifically for Hefty Spin (Skill ID 6).
+#==============================================================================
+
+$imported = {} if $imported.nil?
+$imported["FighterSystem"] = true
+
+#==============================================================================
+# ** Configuration
+#==============================================================================
+module FighterConfig
+  # Multipliers based on remaining MP (after the 1 MP cost is paid)
+  # Index 0 = 0 MP left (cast with 1 MP)
+  # Index 4 = 4 MP left (cast with 5 MP)
+  BLUNT_MULTIPLIERS = [1.0, 1.2, 1.6, 2.2, 3.0]
+end
+
+#==============================================================================
+# ** Game_Battler
+#==============================================================================
+class Game_Battler < Game_BattlerBase
   
-  #---------------------------------------------------------------------------
-  # Hefty spin
-  #---------------------------------------------------------------------------
-  if battle_info_used.id == 6 then 
-    $game_actors[user].add_state(28) else end
+  # Helper method to be used directly inside damage formulas
+  def blunt_mult
+    # Safely checks current MP, caps at 4, and pulls the multiplier
+    FighterConfig::BLUNT_MULTIPLIERS[[self.mp, 4].min]
+  end
+  
+end
+
+#==============================================================================
+# ** RPG::Skill
+#==============================================================================
+class RPG::Skill < RPG::UsableItem
+  
+  #--------------------------------------------------------------------------
+  # * Check for Blunt Skill Notetag
+  #--------------------------------------------------------------------------
+  def is_blunt_skill?
+    if @is_blunt_skill.nil?
+      @is_blunt_skill = (self.note =~ /<blunt skill>/i) != nil
+    end
+    return @is_blunt_skill
+  end
+  
+end
+
+#==============================================================================
+# ** Scene_Battle
+#==============================================================================
+class Scene_Battle < Scene_Base
+
+  unless method_defined?(:fighter_sys_scene_use_item)
+    alias :fighter_sys_scene_use_item :use_item
+  end
+
+  #--------------------------------------------------------------------------
+  # * Override: Intercept item/skill usage execution
+  #--------------------------------------------------------------------------
+  def use_item
+    item = @subject.current_action.item
     
+    # 1. Execute the skill normally first.
+    fighter_sys_scene_use_item
     
+    # 2. Process custom blunt weapon mechanics after damage is calculated
+    if item.is_a?(RPG::Skill) && item.is_blunt_skill?
+      
+      @subject.mp = 0
+      
+      if item.id == 6
+        @subject.add_state(28)
+      end
+      
+    end
+  end
+  
 end
