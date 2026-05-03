@@ -9,11 +9,13 @@ module ChemistConfig
   FERTILIZER_ITEM_ID = 12
   MARTYRS_JOY_ITEM_ID = 13
   COOKING_OIL_ITEM_ID = 16
+  MILK_ITEM_ID = 37
   
   # State IDs
   OILY_STATE_ID = 53
   MARTYRS_JOY_STATE_ID = 68
   POISON_STATE_ID = 2
+  REGEN_STATE_ID = 14
   
   MIX_STATES = {
     herbal: 47,
@@ -154,8 +156,16 @@ class Game_Battler < Game_BattlerBase
       self.perform_collapse_effect
     end
   end
+  
+  # --- Milk: Bypass Engine Buzzer ---
+  alias chemist_sys_item_test item_test
+  def item_test(user, item)
+    # Force the engine to allow target selection for Milk even if it lacks DB effects
+    return true if item.is_a?(RPG::Item) && item.id == ChemistConfig::MILK_ITEM_ID
+    chemist_sys_item_test(user, item)
+  end
 
-  # --- Phase 3: Echinacea Cleansing and Mercury Poisoning ---
+  # --- Phase 3: Echinacea Cleansing, Mercury Poisoning, Herbal Regen, and Milk ---
   alias chemist_item_apply item_apply
   def item_apply(user, item)
     is_chemist_item = item.is_a?(RPG::Item)
@@ -168,24 +178,36 @@ class Game_Battler < Game_BattlerBase
     
     chemist_item_apply(user, item)
     
-    # MERCURY: Apply Poison if the item successfully hit
-    if is_chemist_item && @result.hit? && user.has_mix?(:mercury)
-      self.add_state(ChemistConfig::POISON_STATE_ID)
+    if is_chemist_item && @result.hit?
+      # MILK: Remove all status ailments FIRST (but keep buffs/debuffs)
+      if item.id == ChemistConfig::MILK_ITEM_ID
+        self.states.dup.each { |state| self.remove_state(state.id) }
+        @result.success = true
+      end
+
+      # MERCURY: Apply Poison if the item successfully hit
+      if user.has_mix?(:mercury)
+        self.add_state(ChemistConfig::POISON_STATE_ID)
+      end
+      
+      # HERBAL: Apply Regen state
+      if user.has_mix?(:herbal)
+        self.add_state(ChemistConfig::REGEN_STATE_ID)
+      end
     end
   end
 
-  # --- Phase 3: Damage and Healing Modification ---
+  # --- Phase 3: Damage Modification ---
   alias chemist_make_damage_value make_damage_value
   def make_damage_value(user, item)
     chemist_make_damage_value(user, item)
     if item.is_a?(RPG::Item)
       multiplier = 1.0
+      
+      # Diluent reduces effectiveness by 50%
       multiplier *= 0.5 if user.has_mix?(:diluent)
       
-      if user.has_mix?(:herbal) && (@result.hp_damage < 0 || @result.mp_damage < 0)
-        multiplier *= 2.0
-      end
-      
+      # Gunpowder doubles damage
       if user.has_mix?(:gunpowder) && (@result.hp_damage > 0 || @result.mp_damage > 0)
         multiplier *= 2.0
       end
@@ -195,10 +217,20 @@ class Game_Battler < Game_BattlerBase
     end
   end
 
-  # --- Phase 3: State Replacements ---
+  # --- Phase 3: State Replacements & Probability Scaling ---
   alias chemist_item_effect_add_state item_effect_add_state
   def item_effect_add_state(user, item, effect)
     mod_effect = effect.clone
+    
+    if item.is_a?(RPG::Item)
+      # Modify application chance
+      if user.has_mix?(:gunpowder) && item.for_opponent?
+        mod_effect.value1 *= 2.0
+      elsif user.has_mix?(:diluent)
+        mod_effect.value1 *= 0.5
+      end
+    end
+    
     if ChemistConfig::STATE_REPLACEMENTS[mod_effect.data_id]
       rep = ChemistConfig::STATE_REPLACEMENTS[mod_effect.data_id]
       if user.has_mix?(:herbal) && rep[:herbal]

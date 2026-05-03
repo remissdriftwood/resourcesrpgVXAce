@@ -162,6 +162,66 @@ class Game_Action
 end
 
 #==============================================================================
+# ** Game_Battler (Heal Guard Additions)
+#==============================================================================
+class Game_Battler < Game_BattlerBase
+  
+  attr_accessor :heal_guard_protector
+
+  alias knight_system_hg_initialize initialize
+  def initialize
+    knight_system_hg_initialize
+    @heal_guard_protector = nil
+  end
+
+  # ---------------------------------------------------------------------------
+  # Mark the protector when Heal Guard successfully hits
+  # ---------------------------------------------------------------------------
+  alias knight_system_hg_item_apply item_apply
+  def item_apply(user, item)
+    knight_system_hg_item_apply(user, item)
+    
+    # 31 = Heal Guard Skill ID. 
+    if item.is_a?(RPG::Skill) && item.id == 31 && @result.hit?
+      @heal_guard_protector = user
+    end
+  end
+end
+
+#==============================================================================
+# ** Scene_Battle (Heal Guard Intercept Logic)
+#==============================================================================
+class Scene_Battle < Scene_Base
+
+  # ---------------------------------------------------------------------------
+  # Intercept targeting before default substitution checks
+  # ---------------------------------------------------------------------------
+  alias knight_system_hg_apply_substitute apply_substitute
+  def apply_substitute(target, item)
+    
+    # 1. Custom Heal Guard Check:
+    # Does target have State 34? Do they have a registered protector? Is protector alive?
+    if target.state?(34) && target.heal_guard_protector && target.heal_guard_protector.alive?
+      
+      # Option B: Ignore AoE attacks (!item.for_all?)
+      # Friendly Fire bypass: Only intercept hostile actions (item.for_opponent?)
+      if !item.for_all? && item.for_opponent?
+        substitute = target.heal_guard_protector
+        
+        # Ensure the protector isn't trying to jump in front of themselves
+        if substitute && target != substitute
+          @log_window.display_substitute(substitute, target)
+          return substitute
+        end
+      end
+    end
+    
+    # 2. If Heal Guard didn't trigger, fall back to normal engine checks
+    knight_system_hg_apply_substitute(target, item)
+  end
+end
+
+#==============================================================================
 # ** Scene_Battle
 #==============================================================================
 class Scene_Battle < Scene_Base

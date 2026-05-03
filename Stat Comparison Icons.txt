@@ -1,0 +1,88 @@
+#==============================================================================
+# Stat Comparison Icons (Equip & Shop)
+#==============================================================================
+
+#------------------------------------------------------------------------------
+# Pass the currently highlighted item to the status window so it knows whether
+# we are comparing gear or just hovering over the "Clear" (unequip) option.
+#------------------------------------------------------------------------------
+class Window_EquipItem < Window_ItemList
+  alias :hover_icon_update_help :update_help
+  def update_help
+    hover_icon_update_help
+    @status_window.hovered_item = item if @status_window
+  end
+end
+
+#------------------------------------------------------------------------------
+# Adjust Equip Screen to reclaim horizontal space and draw comparison icons.
+#------------------------------------------------------------------------------
+class Window_EquipStatus < Window_Base
+  attr_accessor :hovered_item
+  
+  # Overwrite draw_item to shift coordinates and reclaim horizontal space
+  def draw_item(x, y, param_id)
+    draw_param_name(x + 4, y, param_id)
+    draw_current_param(x + 60, y, param_id) if @actor
+    draw_right_arrow(x + 94, y)
+    draw_new_param(x + 118, y, param_id) if @temp_actor
+  end
+
+  # Overwrite draw_new_param to include the conditional icon drawing
+  def draw_new_param(x, y, param_id)
+    new_value = @temp_actor.param(param_id)
+    change = new_value - @actor.param(param_id)
+    
+    icon_index = 0
+    if change > 0
+      icon_index = 125
+    elsif change < 0
+      icon_index = 126
+    # Only show 'Same' if the gear actively alters this specific parameter
+    elsif change == 0 && @hovered_item && @hovered_item.params[param_id] != 0
+      icon_index = 127
+    end
+    
+    # Draw the icon if applicable
+    draw_icon(icon_index, x, y) if icon_index > 0
+    
+    # Draw the text consistently pushed 24 pixels right to maintain a clean column
+    change_color(param_change_color(change))
+    draw_text(x + 24, y, 32, line_height, new_value, 2)
+  end
+end
+
+#------------------------------------------------------------------------------
+# Append conditional comparison icons to the default Shop Screen layout.
+#------------------------------------------------------------------------------
+class Window_ShopStatus < Window_Base
+  alias :shop_icon_draw_actor_param_change :draw_actor_param_change
+  def draw_actor_param_change(x, y, actor, item1)
+    # The default Shop screen uses an internal param_id method (2 for ATK, 3 for DEF)
+    change = @item.params[param_id] - (item1 ? item1.params[param_id] : 0)
+    
+    icon_index = 0
+    if change > 0
+      icon_index = 125
+    elsif change < 0
+      icon_index = 126
+    # Only show 'Same' if the shop gear actively alters this parameter
+    elsif change == 0 && @item.params[param_id] != 0
+      icon_index = 127
+    end
+    
+    if icon_index > 0
+      rect = Rect.new(x, y, contents.width - 4 - x, line_height)
+      change_str = sprintf("%+d", change)
+      
+      # Calculate the width of the change text to place the icon directly to its left
+      text_w = text_size(change_str).width
+      icon_x = rect.x + rect.width - text_w - 26
+      
+      draw_icon(icon_index, icon_x, y)
+    end
+    
+    # Render the actual text via the original method
+    shop_icon_draw_actor_param_change(x, y, actor, item1)
+  end
+end

@@ -1,0 +1,91 @@
+#==============================================================================
+# Mid-Battle Enemy Grid Fix & Boss Centering
+#==============================================================================
+
+class Game_Enemy < Game_Battler
+  # Trigger grid recalculation when an enemy appears mid-battle
+  alias visual_grid_appear appear
+  def appear
+    visual_grid_appear
+    $game_troop.arrange_enemy_grid
+  end
+  
+  # Trigger grid recalculation if an enemy transforms mid-battle
+  alias visual_grid_transform transform
+  def transform(enemy_id)
+    visual_grid_transform(enemy_id)
+    $game_troop.arrange_enemy_grid
+  end
+end
+
+class Game_Troop < Game_Unit
+  # Overwriting arrange_enemy_grid to support mid-battle centering
+  def arrange_enemy_grid
+    grid = Array.new(2) { Array.new(4, false) }
+    
+    active_enemies = @enemies.reject {|e| e.hidden? }
+    solitary_l_boss = (active_enemies.size == 1 && active_enemies[0].enemy.grid_size == [2, 2])
+    
+    sorted_to_place = active_enemies.sort_by.with_index do |e, index|
+      w, h = e.enemy.grid_size
+      [-(w * h), index]
+    end
+    
+    sorted_to_place.each do |enemy|
+      w, h = enemy.enemy.grid_size
+      placed = false
+      
+      # Initialize grid dimension data so targeting math doesn't crash on nil
+      enemy.grid_w = w
+      enemy.grid_h = h
+      
+      if solitary_l_boss
+        x, y = 1, 0
+        enemy.grid_x, enemy.grid_y = x, y 
+        target_x = EnemyGrid::GRID_START_X + (x * EnemyGrid::CELL_WIDTH) + (w * EnemyGrid::CELL_WIDTH / 2.0)
+        target_y = EnemyGrid::GRID_START_Y + (y * EnemyGrid::CELL_HEIGHT) + (h * EnemyGrid::CELL_HEIGHT)
+        
+        enemy.screen_x = target_x.round
+        enemy.screen_y = target_y.round
+        next 
+      end
+      
+      # ADJUSTMENT: L-Size bosses (2x2) prefer center (x=1) over left (x=0)
+      x_search_order = (w == 2 && h == 2) ? [1, 0, 2] : (0...(4 - w + 1)).to_a
+      
+      for y in 0...(2 - h + 1)
+        for x in x_search_order
+          free = true
+          for dy in 0...h
+            for dx in 0...w
+              free = false if grid[y + dy][x + dx]
+            end
+          end
+          
+          if free
+            for dy in 0...h
+              for dx in 0...w
+                grid[y + dy][x + dx] = true
+              end
+            end
+            
+            enemy.grid_x, enemy.grid_y = x, y 
+            target_x = EnemyGrid::GRID_START_X + (x * EnemyGrid::CELL_WIDTH) + (w * EnemyGrid::CELL_WIDTH / 2.0)
+            target_y = EnemyGrid::GRID_START_Y + (y * EnemyGrid::CELL_HEIGHT) + (h * EnemyGrid::CELL_HEIGHT)
+            
+            enemy.screen_x = target_x.round
+            enemy.screen_y = target_y.round
+            placed = true
+            break 
+          end
+        end
+        break if placed 
+      end
+      
+      unless placed
+        p "EnemyGrid Warning: Could not fit #{enemy.original_name} into the grid. Hiding sprite."
+        enemy.hide
+      end
+    end
+  end
+end

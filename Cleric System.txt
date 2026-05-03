@@ -110,6 +110,9 @@ class Scene_Battle < Scene_Base
   end
   
   def process_active_circles
+    # Abort if the battle is over
+    return if $game_troop.alive_members.empty? || $game_party.alive_members.empty?
+    
     $Circles_active ||= []
     $Circles_active.reject! { |circle| !circle.active? }
     

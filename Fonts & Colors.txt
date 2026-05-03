@@ -45,7 +45,7 @@ class Scene_Title < Scene_Base
   def draw_game_title
     # Create a temporary window to fetch the exact color from your windowskin
     dummy_window = Window_Base.new(0, 0, 0, 0)
-    color_29 = dummy_window.text_color(29)
+    color_29 = dummy_window.text_color(15)
     dummy_window.dispose
     
     # Apply color 29 to the title font

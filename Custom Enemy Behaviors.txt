@@ -42,7 +42,16 @@ class Game_Enemy < Game_Battler
   def action_valid?(action)
     return false unless sh_custom_action_valid(action)
     
-    # --- 1. Dynamic Healer Logic ---
+    # --- 1. Digest Restriction Logic ---
+    # Any enemy attempting to use Skill 159 will refuse if they already have an active victim
+    if action.skill_id == 159
+      has_digested_target = $game_party.members.any? do |actor|
+        actor.state?(13) && actor.digested_by == self
+      end
+      return false if has_digested_target
+    end
+    
+    # --- 2. Dynamic Healer Logic ---
     # Will only CONSIDER using the specified healing skill if an ally meets the HP threshold
     CustomEnemyConfig::HEALERS.each do |config|
       if config[:enemies].include?(@enemy_id) && action.skill_id == config[:skill_id]

@@ -64,7 +64,7 @@ module CultivatorConfig
   FIRE_ANIMATION_ID = 114  
   
   # EARTH: Follow-up damage based on target's HP before the hit.
-  EARTH_MAX_MULTI = 0.05
+  EARTH_MAX_MULTI = 0.01
   EARTH_ANIMATION_ID = 117 
   
   # METAL: Deals small AOE damage to all enemies on hit.
