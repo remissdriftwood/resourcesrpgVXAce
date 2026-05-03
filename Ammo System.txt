@@ -109,17 +109,48 @@ class Scene_Battle < Scene_Base
       targets = @subject.current_action.make_targets.compact
       
       weapons = @subject.weapons.compact
+      is_single_target = item.for_one? # Determine if this attack can retarget
       
       if weapons.empty?
+        # ---------------------------------------------------------------------
         # Unarmed attack processing
-        show_normal_animation(targets, @subject.atk_animation_id1, false)
-        targets.each do |target|
-          item.repeats.times { invoke_item(target, item) }
+        # ---------------------------------------------------------------------
+        
+        # Verify the target is still alive before starting the attack sequence
+        if is_single_target && targets[0] && targets[0].dead?
+          new_target = $game_troop.alive_members.sample
+          targets = [new_target] if new_target
+        end
+        
+        unless $game_troop.all_dead?
+          show_normal_animation(targets, @subject.atk_animation_id1, false)
+          targets.each do |target|
+            current_target = target
+            item.repeats.times do
+              # Mid-volley retargeting
+              if is_single_target && current_target.dead?
+                current_target = $game_troop.alive_members.sample
+                break unless current_target # End volley if no enemies remain
+              end
+              invoke_item(current_target, item) 
+            end
+          end
         end
       else
-        # Process each equipped weapon independently 
+        # ---------------------------------------------------------------------
+        # Dual Wield / Equipped Weapon processing
+        # ---------------------------------------------------------------------
         @subject.weapons.each_with_index do |weapon, index|
           next if weapon.nil?
+          
+          # EARLY EXIT: If the previous weapon killed the last enemy, skip this weapon.
+          break if $game_troop.all_dead? 
+          
+          # DUAL WIELD RETARGET: If the target died from Weapon 1, Weapon 2 finds a new target.
+          if is_single_target && targets[0] && targets[0].dead?
+            new_target = $game_troop.alive_members.sample
+            targets = [new_target] if new_target
+          end
           
           if weapon.is_gun?
             ammo_crate_active = defined?(ChestConfig) ? @subject.state?(ChestConfig::AMMO_CRATE_STATE) : false
@@ -136,7 +167,15 @@ class Scene_Battle < Scene_Base
               show_normal_animation(targets, anim_id, false)
               
               targets.each do |target|
-                shots_fired.times { invoke_item(target, item) }
+                current_target = target
+                shots_fired.times do
+                  # Mid-volley retargeting for multiple gunshots
+                  if is_single_target && current_target.dead?
+                    current_target = $game_troop.alive_members.sample
+                    break unless current_target # End volley if no enemies remain
+                  end
+                  invoke_item(current_target, item)
+                end
               end
             end
           else
@@ -144,7 +183,15 @@ class Scene_Battle < Scene_Base
             anim_id = index == 0 ? @subject.atk_animation_id1 : @subject.atk_animation_id2
             show_normal_animation(targets, anim_id, false)
             targets.each do |target|
-              item.repeats.times { invoke_item(target, item) }
+              current_target = target
+              item.repeats.times do
+                # Mid-volley retargeting for multi-hit melee weapons
+                if is_single_target && current_target.dead?
+                  current_target = $game_troop.alive_members.sample
+                  break unless current_target # End volley if no enemies remain
+                end
+                invoke_item(current_target, item)
+              end
             end
           end
         end
