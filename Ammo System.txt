@@ -109,7 +109,8 @@ class Scene_Battle < Scene_Base
       targets = @subject.current_action.make_targets.compact
       
       weapons = @subject.weapons.compact
-      is_single_target = item.for_one? # Determine if this attack can retarget
+      is_single_target = item.for_one?
+      is_normal_attack = (item.id == @subject.attack_skill_id)
       
       if weapons.empty?
         # ---------------------------------------------------------------------
@@ -144,7 +145,7 @@ class Scene_Battle < Scene_Base
           next if weapon.nil?
           
           # EARLY EXIT: If the previous weapon killed the last enemy, skip this weapon.
-          break if $game_troop.all_dead? 
+          break if $game_troop.all_dead?
           
           # DUAL WIELD RETARGET: If the target died from Weapon 1, Weapon 2 finds a new target.
           if is_single_target && targets[0] && targets[0].dead?
@@ -152,7 +153,8 @@ class Scene_Battle < Scene_Base
             targets = [new_target] if new_target
           end
           
-          if weapon.is_gun?
+          # Only demand ammo logic if it's a gun AND a normal attack
+          if weapon.is_gun? && is_normal_attack
             ammo_crate_active = defined?(ChestConfig) ? @subject.state?(ChestConfig::AMMO_CRATE_STATE) : false
 
             if @subject.ammo[index] <= 0 && !ammo_crate_active
@@ -179,13 +181,13 @@ class Scene_Battle < Scene_Base
               end
             end
           else
-            # Melee weapon processing
+            # Melee weapon OR Skill processing
             anim_id = index == 0 ? @subject.atk_animation_id1 : @subject.atk_animation_id2
             show_normal_animation(targets, anim_id, false)
             targets.each do |target|
               current_target = target
               item.repeats.times do
-                # Mid-volley retargeting for multi-hit melee weapons
+                # Mid-volley retargeting for multi-hit melee weapons or skills
                 if is_single_target && current_target.dead?
                   current_target = $game_troop.alive_members.sample
                   break unless current_target # End volley if no enemies remain
@@ -227,8 +229,8 @@ class Game_Battler < Game_BattlerBase
   def item_apply(user, item)
     ammo_system_item_apply(user, item)
     
-    # MP Regen: Procs every time invoke_item successfully lands a hit
-    if @result.hit? && user.is_a?(Game_Actor) && item.is_a?(RPG::Skill) && (item.id == user.attack_skill_id || item.is_weapon_attack?)
+    # MP Regen: Procs every time invoke_item successfully lands a hit on a NORMAL attack
+    if @result.hit? && user.is_a?(Game_Actor) && item.is_a?(RPG::Skill) && item.id == user.attack_skill_id
       if FighterAmmoConfig::FIGHTER_CLASS_IDS.include?(user.class_id)
         user.mp += 1
       end
