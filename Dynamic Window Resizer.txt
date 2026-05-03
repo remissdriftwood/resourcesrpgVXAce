@@ -1,0 +1,67 @@
+#==============================================================================
+# ** Dynamic Battle Skill & Item Window Resizer
+#------------------------------------------------------------------------------
+# Automatically shrinks the Skill and Item windows in battle so they do not
+# overlap with the Class MP, Ammo, Cultivator Element, or Farmer Seed windows.
+#==============================================================================
+
+class Scene_Battle < Scene_Base
+  
+  #--------------------------------------------------------------------------
+  # * Alias: Command Skill
+  #--------------------------------------------------------------------------
+  alias dyn_resize_command_skill command_skill
+  def command_skill
+    resize_battle_list_window(@skill_window)
+    dyn_resize_command_skill
+  end
+  
+  #--------------------------------------------------------------------------
+  # * Alias: Command Item
+  #--------------------------------------------------------------------------
+  alias dyn_resize_command_item command_item
+  def command_item
+    resize_battle_list_window(@item_window)
+    dyn_resize_command_item
+  end
+
+  #--------------------------------------------------------------------------
+  # * New Method: Resize Battle List Window
+  #--------------------------------------------------------------------------
+  def resize_battle_list_window(window)
+    # 1. Determine the baseline height (The space between the top Help Window 
+    #    and the bottom Actor Status/Command viewport)
+    base_bottom_y = @info_viewport.rect.y
+    base_height = base_bottom_y - @help_window.height
+    
+    # 2. Check all custom UI windows and find the tallest visible one
+    offset = 0
+    
+    if @ammo_window && @ammo_window.visible && @ammo_window.height > offset
+      offset = @ammo_window.height
+    end
+    
+    if @farmer_seeds_window && @farmer_seeds_window.visible && @farmer_seeds_window.height > offset
+      offset = @farmer_seeds_window.height
+    end
+    
+    if @cultivator_element_window && @cultivator_element_window.visible && @cultivator_element_window.height > offset
+      offset = @cultivator_element_window.height
+    end
+    
+    if @class_mp_info_window && @class_mp_info_window.visible && @class_mp_info_window.height > offset
+      offset = @class_mp_info_window.height
+    end
+    
+    # 3. Calculate the new safe height
+    new_height = base_height - offset
+    
+    # 4. Apply the new height ONLY if it has changed
+    if window.height != new_height
+      window.height = new_height
+      # Recreate the internal bitmap so Window_Selectable knows to enable scrolling
+      window.create_contents 
+    end
+  end
+  
+end
