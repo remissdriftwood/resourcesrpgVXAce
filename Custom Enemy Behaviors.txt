@@ -170,56 +170,116 @@ class Game_Battler < Game_BattlerBase
     
     # Run original death processing
     sh_custom_enemy_die
-    
-    # --- Digest Logic: Prey Dies ---
-    if was_digested && digester && digester.alive?
-      heal_amount = (digester.mhp * 0.25).to_i
-      digester.hp += heal_amount
-      if SceneManager.scene.is_a?(Scene_Battle)
-        SceneManager.scene.log_window.add_text("#{digester.name} finishes digesting its prey and recovers HP!")
-        SceneManager.scene.log_window.wait
-      end
+ 
+    # Log the death to be safely processed at the end of the action
+    if $game_party.in_battle && SceneManager.scene.is_a?(Scene_Battle)
+      SceneManager.scene.pending_death_reactions ||= []
+      SceneManager.scene.pending_death_reactions << {
+        target: self,
+        was_digested: was_digested,
+        digester: digester
+      }
     end
+  end
+  
+end
+
+#==============================================================================
+# ** Scene_Battle (Post-Action Death Reactions)
+#==============================================================================
+class Scene_Battle < Scene_Base
+  attr_accessor :pending_death_reactions
+
+  alias custom_enemy_process_action_end process_action_end
+  def process_action_end
+    custom_enemy_process_action_end
+    process_pending_death_reactions
+  end
+
+  alias custom_enemy_turn_end turn_end
+  def turn_end
+    process_pending_death_reactions
+    custom_enemy_turn_end
+  end
+
+  def process_pending_death_reactions
+    @pending_death_reactions ||= []
+    return if @pending_death_reactions.empty?
     
-    # --- Digest Logic: Digester Dies ---
-    if self.is_a?(Game_Enemy) && $game_party.in_battle
-      $game_party.members.each do |actor|
-        if actor.digested_by == self && actor.state?(13)
-          actor.remove_state(13) 
-        end
-      end
-    end
-    
-    # --- Carrion Eater Logic ---
-    if self.is_a?(Game_Enemy) && $game_party.in_battle
-      carrion_eaters = $game_troop.alive_members.select { |enemy| [25, 26, 27].include?(enemy.enemy_id) && enemy != self }
-      
-      unless carrion_eaters.empty?
-        carrion_eaters.each do |carrion|
-          carrion.hp = carrion.mhp
-        end
-        
-        if SceneManager.scene.is_a?(Scene_Battle)
-          SceneManager.scene.log_window.add_text("Carrion Eater devours its fallen comrade! Carrion Eater is healed to full HP!")
-          SceneManager.scene.log_window.wait
-        end
-      end
-    end
-    
-    # --- Leaguer Logic ---
-    if $game_party.in_battle
-      leaguers = $game_troop.alive_members.select { |enemy| [28, 29, 30].include?(enemy.enemy_id) && enemy != self }
-      unless leaguers.empty?
-        leaguers.each do |leaguer|
-          leaguer.leaguer_cri_bonus ||= 0.0
-          leaguer.leaguer_cri_bonus += 0.05
-          if SceneManager.scene.is_a?(Scene_Battle)
-            SceneManager.scene.log_window.add_text("#{leaguer.name} relishes the gore of battle!")
-            SceneManager.scene.log_window.wait
+    deaths = @pending_death_reactions.clone
+    @pending_death_reactions.clear
+
+    # --- 1. Digest Logic: Digester Dies ---
+    deaths.each do |d|
+      target = d[:target]
+      if target.is_a?(Game_Enemy)
+        $game_party.members.each do |actor|
+          if actor.digested_by == target && actor.state?(13)
+            actor.remove_state(13) 
           end
         end
       end
     end
-    
+
+    # --- 2. Digest Logic: Prey Dies ---
+    deaths.each do |d|
+      if d[:was_digested] && d[:digester] && d[:digester].alive?
+        heal_amount = (d[:digester].mhp * 0.25).to_i
+        d[:digester].hp += heal_amount
+        
+        @log_window.step_five_wipe
+        @log_window.add_text("#{d[:digester].name} finishes digesting its prey")
+        @log_window.add_text("and recovers #{heal_amount} HP!")
+        @log_window.wait
+        @log_window.step_five_wipe
+      end
+    end
+
+    # --- 3. Carrion Eater Logic ---
+    enemy_deaths = deaths.select { |d| d[:target].is_a?(Game_Enemy) }
+    if enemy_deaths.any?
+      carrions = $game_troop.alive_members.select { |e| [25, 26, 27].include?(e.enemy_id) }
+      if carrions.any?
+        @log_window.step_five_wipe
+        carrions.each { |c| c.hp = c.mhp }
+        
+        # Adaptive grammar if multiple Carrion Eaters are on the field
+        if carrions.size > 1
+          @log_window.add_text("The Carrion Eaters devour the fallen")
+          @log_window.add_text("and are healed to full HP!")
+        else
+          @log_window.add_text("#{carrions[0].name} devours the fallen")
+          @log_window.add_text("and is healed to full HP!")
+        end
+        
+        @log_window.wait
+        @log_window.step_five_wipe
+      end
+    end
+
+    # --- 4. Leaguer Logic ---
+    if deaths.any?
+      leaguers = $game_troop.alive_members.select { |e| [28, 29, 30].include?(e.enemy_id) }
+      if leaguers.any?
+        bonus = 0.05 * deaths.size
+        @log_window.step_five_wipe
+        
+        leaguers.each do |l|
+          l.leaguer_cri_bonus ||= 0.0
+          l.leaguer_cri_bonus += bonus
+        end
+        
+        if leaguers.size > 1
+          @log_window.add_text("The Leaguers relish the gore of battle!")
+        else
+          @log_window.add_text("#{leaguers[0].name} relishes the gore of battle!")
+        end
+        @log_window.add_text("Critical hit rate increased by #{deaths.size * 5}%!")
+        
+        @log_window.wait
+        @log_window.step_five_wipe
+      end
+    end
+
   end
 end
