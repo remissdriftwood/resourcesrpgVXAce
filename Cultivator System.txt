@@ -56,11 +56,11 @@ module CultivatorConfig
   WATER_ANIMATION_ID = 121 
   
   # WOOD: Restores Self HP equal to MAT * multiplier
-  WOOD_MAT_MULTI = 1.0
+  WOOD_MAT_MULTI = 0.6
   WOOD_ANIMATION_ID = 121  
   
   # FIRE: Adds (MAT * multiplier) to Critical Hit Chance.
-  FIRE_CRIT_MULTI = 0.0015
+  FIRE_CRIT_MULTI = 0.0035
   FIRE_ANIMATION_ID = 114  
   
   # EARTH: Follow-up damage based on target's HP before the hit.
@@ -552,21 +552,20 @@ class Scene_Battle < Scene_Base
     return unless target.result.hit? && [1, 2, 5, 6].include?(item.damage.type)
     
     element = user.cultivator_element
+    element_triggered = false
     
     case element
     when :earth
-      # Calculate Earth follow-up damage based on HP ratio *before* the initial hit
       hp_before_hit = target.hp + target.result.hp_damage
       hp_ratio = target.mhp > 0 ? (hp_before_hit.to_f / target.mhp) : 0.0
       max_bonus = user.mat * CultivatorConfig::EARTH_MAX_MULTI
-      
       bonus_damage = (target.result.hp_damage * (max_bonus * hp_ratio)).to_i
       
       if bonus_damage > 0 && target.alive?
         show_animation([target], CultivatorConfig::EARTH_ANIMATION_ID)
         target.hp -= bonus_damage
         @log_window.add_text("#{target.name} takes #{bonus_damage} Earth damage!")
-        @log_window.wait
+        element_triggered = true
         target.perform_collapse_effect if target.dead?
       end
       
@@ -579,8 +578,8 @@ class Scene_Battle < Scene_Base
         targets.each do |actor|
           actor.hp += heal_amount
           @log_window.add_text("#{actor.name} restores #{heal_amount} HP!")
-          @log_window.wait
         end
+        element_triggered = true
       end
       
     when :wood
@@ -589,7 +588,7 @@ class Scene_Battle < Scene_Base
         show_animation([user], CultivatorConfig::WOOD_ANIMATION_ID)
         user.hp += heal_amount
         @log_window.add_text("#{user.name} restores #{heal_amount} HP!")
-        @log_window.wait
+        element_triggered = true
       end
       
     when :metal
@@ -604,13 +603,15 @@ class Scene_Battle < Scene_Base
           if damage > 0
             target_enemy.hp -= damage
             @log_window.add_text("#{target_enemy.name} takes #{damage} Metal splash damage!")
-            @log_window.wait
             target_enemy.perform_collapse_effect if target_enemy.dead?
+            element_triggered = true
           end
         end
       end
-      
     end
+    
+    # Step 5: Wipe the log clean to prevent cascades on multi-hits
+    @log_window.step_five_wipe if element_triggered
   end
   
 end
@@ -640,11 +641,18 @@ class Scene_Battle < Scene_Base
       #-------------------------------------------------------------------------
       if item.is_a?(RPG::UsableItem) && item.expend_element? && element
         user.cultivator_element = nil
+        
+        # PRE-WIPE: Ensure all damage and elemental procs have cleared the log
+        @log_window.step_five_wipe
+        
         @log_window.add_text("#{user.name} expended their")
         @log_window.add_text("elemental energy!")
         @log_window.wait
         
         @cultivator_element_window.refresh if @cultivator_element_window
+        
+        # POST-WIPE: Final cleanup before the next actor's turn begins
+        @log_window.step_five_wipe
       end
       
     end
@@ -759,11 +767,17 @@ class Scene_Battle < Scene_Base
     if item.is_a?(RPG::UsableItem) && item.is_earth_call? && user.is_a?(Game_Actor)
       mp_amount, elem_name = user.perform_earth_call
       
+      # PRE-WIPE: Ensure the native "Actor uses Earth Call!" text is cleared
+      @log_window.step_five_wipe
+      
       @log_window.add_text("#{user.name} channels nature!")
       @log_window.add_text("Restored #{mp_amount} MP and imbued #{elem_name}!")
       @log_window.wait
       
       @cultivator_element_window.refresh if @cultivator_element_window
+      
+      # POST-WIPE: Clean up for the next turn
+      @log_window.step_five_wipe
     end
   end
   
@@ -864,14 +878,20 @@ class Scene_Battle < Scene_Base
         target = $game_troop.alive_members.sample
         next unless target 
         
+        # PRE-WIPE: Ensure end-of-turn log is clean before starting
+        @log_window.step_five_wipe
+        
+        # STEP 1 & 2: Action Declaration
         @log_window.add_text("#{actor.name}'s flying sword")
         @log_window.add_text("strikes #{target.name}!")
         @log_window.wait
         
+        # STEP 3: Animation
         wait_for_animation
         show_animation([target], CultivatorConfig::FLYING_SWORD_ANIM_ID)
         wait_for_animation
         
+        # STEP 4: Damage Calculation & Display
         action = Game_Action.new(actor)
         action.set_attack
         
@@ -880,12 +900,15 @@ class Scene_Battle < Scene_Base
         target.item_apply(actor, action.item)
         target.perform_damage_effect
         @log_window.display_action_results(target, action.item)
-        @log_window.wait
         
-        # NEW: Process elements for Sword on a String
+        # Element Procs
         process_cultivator_post_hit_elements(actor, target, action.item)
         
+        # Check for Energy Swords triggering off the Flying Sword
         check_and_fire_energy_swords(actor, target, action.item)
+        
+        # POST-WIPE: Clean up before checking the next actor
+        @log_window.step_five_wipe
         
         @subject = nil
       end
@@ -941,29 +964,37 @@ class Scene_Battle < Scene_Base
         
         user.energy_sword_in_progress = true
         
-        @log_window.add_text("Energy swords follow up!")
+        # PRE-WIPE: Clean up the text of the attack that triggered this
+        @log_window.step_five_wipe
+        
+        # STEP 1 & 2: Action Declaration
+        @log_window.add_text("#{user.name}'s energy swords")
+        @log_window.add_text("follow up the attack!")
         @log_window.wait
         
-        # Ensure previous animations (like Fire) are completely done
+        # STEP 3: Animation
+        # Ensure previous animations are completely done
         wait_for_animation 
         show_animation([target], CultivatorConfig::ENERGY_SWORD_ANIM_ID)
-        # Ensure energy sword finishes before damage/fire triggers
+        # Ensure energy sword finishes before damage text
         wait_for_animation 
         
+        # STEP 4: Damage Calculation & Display
         action = Game_Action.new(user)
         action.set_skill(CultivatorConfig::ENERGY_SWORD_FOLLOWUP_SKILL_ID) 
         
-        # Temporarily set @subject so the Fire battle log check can identify the actor
         prev_subject = @subject
         @subject = user
         
         target.item_apply(user, action.item)
         target.perform_damage_effect
         @log_window.display_action_results(target, action.item)
-        @log_window.wait
         
-        # NEW: Process elements for Energy Swords
+        # Element Procs
         process_cultivator_post_hit_elements(user, target, action.item)
+        
+        # POST-WIPE: Clean up so the next hit in a multi-hit chain is blank
+        @log_window.step_five_wipe
         
         @subject = prev_subject
         user.energy_sword_in_progress = false
@@ -1055,6 +1086,9 @@ class Scene_Battle < Scene_Base
     if target.is_a?(Game_Actor) && target.yuanying_triggered
       target.yuanying_triggered = false
       
+      # PRE-WIPE: Clear the enemy's attack text that caused the fatal blow
+      @log_window.step_five_wipe
+      
       # Print the flavor text
       @log_window.add_text("#{target.name}'s duplicate took the fatal blow!")
       @log_window.add_text("#{target.name} steps in to take their place.")
@@ -1063,6 +1097,9 @@ class Scene_Battle < Scene_Base
       # Play animation and refresh HP bar
       show_animation([target], CultivatorConfig::YUANYING_ANIM_ID)
       @status_window.refresh 
+      
+      # POST-WIPE: Clean up so the next attack in the queue is blank
+      @log_window.step_five_wipe
     end
   end
   
